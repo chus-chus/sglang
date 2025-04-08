@@ -241,30 +241,15 @@ class CacheTelemetry:
             if self.request_stats[request_id]["evictions"] == num_blocks:
                 self.requests_with_evictions += 1
 
-    def get_hit_rate(self) -> float:
-
-        if self.total_blocks > 0:
-            return self.total_hits / self.total_blocks
-        return 0.0
-
-    def get_miss_rate(self) -> float:
-
-        if self.total_blocks > 0:
-            return self.total_misses / self.total_blocks
-        return 0.0
-
     def get_all_stats(self) -> Dict:
-
-        hit_rate = self.get_hit_rate()
-        miss_rate = self.get_miss_rate()
 
         return {
             "block_level": {
                 "total_blocks": self.total_blocks,
                 "hits": self.total_hits,
                 "misses": self.total_misses,
-                "hit_rate": hit_rate,
-                "miss_rate": miss_rate,
+                "hit_rate": self.total_hits / self.total_blocks,
+                "miss_rate": self.total_misses / self.total_blocks,
                 "evictions": self.total_evictions,
             },
             "request_level": {
@@ -272,8 +257,8 @@ class CacheTelemetry:
                 "requests_with_hits": self.requests_with_hits,
                 "requests_with_misses": self.requests_with_misses,
                 "requests_with_evictions": self.requests_with_evictions,
-                "hit_rate": self.requests_with_hits / self.unique_requests if self.unique_requests > 0 else 0.0,
-                "miss_rate": self.requests_with_misses / self.unique_requests if self.unique_requests > 0 else 0.0,
+                "hit_rate": self.requests_with_hits / self.unique_requests if self.unique_requests > 0 else 0.,
+                "miss_rate": self.requests_with_misses / self.unique_requests if self.unique_requests > 0 else 0.,
             },
             "cache_type": self.cache_type,
             "page_size": self.page_size,
