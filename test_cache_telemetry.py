@@ -14,7 +14,7 @@ print_highlight("Starting server with cache telemetry enabled...")
 server_process, port = launch_server_cmd(
     """
 python -m sglang.launch_server --model-path meta-llama/Meta-Llama-3.1-8B-Instruct \
- --host 0.0.0.0 --enable-cache-report --mem-fraction-static 0.345
+ --host 0.0.0.0 --enable-cache-report --mem-fraction-static 0.345 --enable-hierarchical-cache
 """
 )
 
@@ -103,7 +103,7 @@ prompts = [
 try:
     # First round: Send a batch of initial requests
     print_highlight("\n=== init request sending ===")
-    for i in range(30):
+    for i in range(2):
         prompt_idx = random.randint(0, len(prompts)-1)
         # prompt_idx = i
         send_request(prompts[prompt_idx], f"init-{i}")

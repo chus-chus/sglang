@@ -1,0 +1,21 @@
+{
+    "block_level": {
+        "total_blocks": 849,
+        "hits": 121,
+        "misses": 728,
+        "hit_rate": 0.1425206124852768,
+        "miss_rate": 0.8574793875147232,
+        "evictions": 0
+    },
+    "request_level": {
+        "unique_requests": 3,
+        "requests_with_hits": 3,
+        "requests_with_misses": 3,
+        "requests_with_evictions": 0,
+        "hit_rate": 1.0,
+        "miss_rate": 1.0
+    },
+    "cache_type": "hiradix",
+    "page_size": 1,
+    "timestamp": 1744146941.1882713
+}

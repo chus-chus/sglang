@@ -106,7 +106,6 @@ class RadixCache(BasePrefixCache):
         radix_telemetry: bool = True,
     ):
         self.req_to_token_pool = req_to_token_pool
-        print("[DEBUG] RadixCache: req_to_token_pool", req_to_token_pool)
         self.token_to_kv_pool_allocator = token_to_kv_pool_allocator
         self.page_size = page_size
         self.disable = disable
@@ -186,13 +185,13 @@ class RadixCache(BasePrefixCache):
             value = torch.empty((0,), dtype=torch.int64, device=self.device)
         return value, last_node
 
-    def insert(self, key: List, value=None):
+    def insert(self, key: List, value=None, rid: str = None):
         if self.disable:
             return 0
 
         if value is None:
             value = [x for x in key]
-        return self._insert_helper(self.root_node, key, value)
+        return self._insert_helper(self.root_node, key, value, rid)
 
     def cache_finished_req(self, req: Req):
         """Cache request when it finishes."""
@@ -219,7 +218,7 @@ class RadixCache(BasePrefixCache):
 
         # Radix Cache takes one ref in memory pool
         new_prefix_len = self.insert(
-            token_ids[:page_aligned_len], page_aligned_kv_indices
+            token_ids[:page_aligned_len], page_aligned_kv_indices, req.rid
         )
         self.token_to_kv_pool_allocator.free(
             kv_indices[len(req.prefix_indices) : new_prefix_len]
@@ -397,7 +396,7 @@ class RadixCache(BasePrefixCache):
         new_node.parent.children[self.get_child_key_fn(key)] = new_node
         return new_node
 
-    def _insert_helper(self, node: TreeNode, key: List, value):
+    def _insert_helper(self, node: TreeNode, key: List, value, rid: str):
         node.last_access_time = time.time()
         if len(key) == 0:
             return 0
@@ -415,7 +414,7 @@ class RadixCache(BasePrefixCache):
                 num_blocks_hit = prefix_len
             else:
                 num_blocks_hit = (prefix_len + self.page_size - 1) // self.page_size
-            self.cache_telemetry.record_hit(num_blocks_hit)
+            self.cache_telemetry.record_hit(num_blocks_hit, rid)
             
             total_prefix_length += prefix_len
             key = key[prefix_len:]
@@ -434,7 +433,7 @@ class RadixCache(BasePrefixCache):
                 num_blocks_missed = len(key)
             else:
                 num_blocks_missed = (len(key) + self.page_size - 1) // self.page_size
-            self.cache_telemetry.record_miss(num_blocks_missed)
+            self.cache_telemetry.record_miss(num_blocks_missed, rid)
             
             new_node = TreeNode()
             new_node.parent = node

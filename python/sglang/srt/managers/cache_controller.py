@@ -22,6 +22,7 @@ import threading
 from collections import defaultdict
 from queue import Empty, Full, PriorityQueue, Queue
 from typing import Dict, List, Optional, Tuple
+import datetime
 
 import torch
 
@@ -184,60 +185,45 @@ class CacheTelemetry:
         self.tracked_requests = set()   # To keep track of unique request IDs
 
     def record_hit(self, num_blocks: int, request_id=None):
-        # Update block-level statistics
         self.total_blocks += num_blocks
         self.total_hits += num_blocks
 
-        # Update request-level statistics if request_id is provided
         if request_id is not None:
-            # Register as a new unique request if not seen before
             if request_id not in self.tracked_requests:
                 self.unique_requests += 1
                 self.tracked_requests.add(request_id)
             
-            # Update per-request statistics
             self.request_stats[request_id]["blocks"] += num_blocks
             self.request_stats[request_id]["hits"] += num_blocks
             
-            # Mark this request as having a hit if it's the first hit
             if self.request_stats[request_id]["hits"] == num_blocks:
                 self.requests_with_hits += 1
 
     def record_miss(self, num_blocks: int, request_id=None):
-        # Update block-level statistics
         self.total_blocks += num_blocks
         self.total_misses += num_blocks
 
-        # Update request-level statistics if request_id is provided
         if request_id is not None:
-            # Register as a new unique request if not seen before
             if request_id not in self.tracked_requests:
                 self.unique_requests += 1
                 self.tracked_requests.add(request_id)
             
-            # Update per-request statistics
             self.request_stats[request_id]["blocks"] += num_blocks
             self.request_stats[request_id]["misses"] += num_blocks
             
-            # Mark this request as having a miss if it's the first miss
             if self.request_stats[request_id]["misses"] == num_blocks:
                 self.requests_with_misses += 1
 
     def record_eviction(self, num_blocks: int, request_id=None):
-        # Update block-level statistics
         self.total_evictions += num_blocks
 
-        # Update request-level statistics if request_id is provided
         if request_id is not None:
-            # Register as a new unique request if not seen before
             if request_id not in self.tracked_requests:
                 self.unique_requests += 1
                 self.tracked_requests.add(request_id)
             
-            # Update per-request statistics
             self.request_stats[request_id]["evictions"] += num_blocks
             
-            # Mark this request as having an eviction if it's the first eviction
             if self.request_stats[request_id]["evictions"] == num_blocks:
                 self.requests_with_evictions += 1
 
@@ -262,7 +248,7 @@ class CacheTelemetry:
             },
             "cache_type": self.cache_type,
             "page_size": self.page_size,
-            "timestamp": time.time(),
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
     def record_stats(self):

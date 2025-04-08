@@ -384,7 +384,7 @@ class HiRadixCache(RadixCache):
         new_node.parent.children[self.get_child_key_fn(key)] = new_node
         return new_node
 
-    def _insert_helper(self, node: TreeNode, key: List, value):
+    def _insert_helper(self, node: TreeNode, key: List, value, rid: str = None):
         node.last_access_time = time.time()
         if len(key) == 0:
             return 0
@@ -398,12 +398,11 @@ class HiRadixCache(RadixCache):
             prefix_len = self.key_match_fn(node.key, key)
 
             # cache hit
-            print(f"[DEBUG] Cache hit @ hiradix: {prefix_len}")
             if self.page_size == 1:
                 num_blocks_hit = prefix_len
             else:
                 num_blocks_hit = (prefix_len + self.page_size - 1) // self.page_size
-            self.cache_telemetry.record_hit(num_blocks_hit)
+            self.cache_telemetry.record_hit(num_blocks_hit, rid)
         
             if prefix_len == len(node.key):
                 if node.evicted:
@@ -439,7 +438,7 @@ class HiRadixCache(RadixCache):
                 num_blocks_missed = len(key)
             else:
                 num_blocks_missed = (len(key) + self.page_size - 1) // self.page_size
-            self.cache_telemetry.record_miss(num_blocks_missed)
+            self.cache_telemetry.record_miss(num_blocks_missed, rid)
             
             new_node = TreeNode()
             new_node.parent = node
