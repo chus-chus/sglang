@@ -68,7 +68,7 @@ class HiRadixCache(RadixCache):
 
     def reset(self):
         # reset telemetry counters
-        if hasattr(self, 'cache_telemetry'):
+        if self.enable_cache_telemetry and hasattr(self, 'cache_telemetry'):
             self.cache_telemetry.reset()
 
         TreeNode.counter = 0
