@@ -6,7 +6,7 @@ from typing import List, Optional
 
 import torch
 
-from sglang.srt.managers.cache_controller import HiCacheController
+from sglang.srt.managers.cache_controller import HiCacheController, CacheTelemetry
 from sglang.srt.mem_cache.memory_pool import (
     MHATokenToKVPool,
     MHATokenToKVPoolHost,
@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 
 class HiRadixCache(RadixCache):
-
     def __init__(
         self,
         req_to_token_pool: ReqToTokenPool,
@@ -51,7 +50,7 @@ class HiRadixCache(RadixCache):
             page_size,
             load_cache_event=self.load_cache_event,
         )
-
+        
         # record the nodes with ongoing write through
         self.ongoing_write_through = {}
         # record the node segments with ongoing load back
@@ -60,10 +59,15 @@ class HiRadixCache(RadixCache):
         self.write_through_threshold = 1
         self.load_back_threshold = 10
         super().__init__(
-            req_to_token_pool, token_to_kv_pool_allocator, page_size, disable=False
+            req_to_token_pool, token_to_kv_pool_allocator, page_size, disable=False, radix_telemetry=False,
         )
+        self.cache_telemetry = CacheTelemetry(page_size, "hiradix")
 
     def reset(self):
+        # reset telemetry counters
+        if hasattr(self, 'cache_telemetry'):
+            self.cache_telemetry.reset()
+
         TreeNode.counter = 0
         self.cache_controller.reset()
         self.token_to_kv_pool_host.clear()
@@ -162,6 +166,13 @@ class HiRadixCache(RadixCache):
                     raise NotImplementedError
             else:
                 num_evicted += self._evict_write_through(x)
+
+            # cache eviction
+            if self.page_size == 1:
+                num_blocks_evicted = len(x.value)
+            else:
+                num_blocks_evicted = (len(x.value) + self.page_size - 1) // self.page_size
+            self.cache_telemetry.record_eviction(num_blocks_evicted)
 
             for child in x.parent.children.values():
                 if child in pending_nodes:
@@ -386,6 +397,14 @@ class HiRadixCache(RadixCache):
             node.last_access_time = time.time()
             prefix_len = self.key_match_fn(node.key, key)
 
+            # cache hit
+            print(f"[DEBUG] Cache hit @ hiradix: {prefix_len}")
+            if self.page_size == 1:
+                num_blocks_hit = prefix_len
+            else:
+                num_blocks_hit = (prefix_len + self.page_size - 1) // self.page_size
+            self.cache_telemetry.record_hit(num_blocks_hit)
+        
             if prefix_len == len(node.key):
                 if node.evicted:
                     # change the reference if the node is evicted
@@ -415,6 +434,13 @@ class HiRadixCache(RadixCache):
                 child_key = self.get_child_key_fn(key)
 
         if len(key):
+            # cache miss
+            if self.page_size == 1:
+                num_blocks_missed = len(key)
+            else:
+                num_blocks_missed = (len(key) + self.page_size - 1) // self.page_size
+            self.cache_telemetry.record_miss(num_blocks_missed)
+            
             new_node = TreeNode()
             new_node.parent = node
             new_node.key = key

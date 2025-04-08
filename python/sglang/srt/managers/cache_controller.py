@@ -14,11 +14,14 @@ limitations under the License.
 """
 
 import concurrent.futures
+import json
 import logging
 import math
+import time
 import threading
+from collections import defaultdict
 from queue import Empty, Full, PriorityQueue, Queue
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import torch
 
@@ -141,6 +144,148 @@ class TransferBuffer:
 
     def clear(self):
         self.buffers.queue.clear()
+
+
+class CacheTelemetry:
+    """
+    Track cache hit/miss statistics at both request and block levels.
+    """
+
+    def __init__(self, page_size: int, cache_type: str):
+        print("[DEBUG] CacheTelemetry: Initializing telemetry tracking")
+        self.page_size = page_size
+        self.cache_type = cache_type
+        self.reset()
+
+    def reset(self):
+        """Reset all telemetry counters."""
+        print("[DEBUG] CacheTelemetry: Resetting all telemetry counters")
+        
+        # block
+        self.total_blocks = 0
+        self.total_hits = 0
+        self.total_misses = 0
+        self.total_evictions = 0
+        
+        # requests
+        self.unique_requests = 0
+        self.requests_with_hits = 0
+        self.requests_with_misses = 0
+        self.requests_with_evictions = 0
+        
+        self.request_stats = defaultdict(
+            lambda: {
+                "blocks": 0,
+                "hits": 0,
+                "misses": 0,
+                "evictions": 0,
+            }
+        )
+        self.tracked_requests = set()   # To keep track of unique request IDs
+
+    def record_hit(self, num_blocks: int, request_id=None):
+        # Update block-level statistics
+        self.total_blocks += num_blocks
+        self.total_hits += num_blocks
+
+        # Update request-level statistics if request_id is provided
+        if request_id is not None:
+            # Register as a new unique request if not seen before
+            if request_id not in self.tracked_requests:
+                self.unique_requests += 1
+                self.tracked_requests.add(request_id)
+            
+            # Update per-request statistics
+            self.request_stats[request_id]["blocks"] += num_blocks
+            self.request_stats[request_id]["hits"] += num_blocks
+            
+            # Mark this request as having a hit if it's the first hit
+            if self.request_stats[request_id]["hits"] == num_blocks:
+                self.requests_with_hits += 1
+
+    def record_miss(self, num_blocks: int, request_id=None):
+        # Update block-level statistics
+        self.total_blocks += num_blocks
+        self.total_misses += num_blocks
+
+        # Update request-level statistics if request_id is provided
+        if request_id is not None:
+            # Register as a new unique request if not seen before
+            if request_id not in self.tracked_requests:
+                self.unique_requests += 1
+                self.tracked_requests.add(request_id)
+            
+            # Update per-request statistics
+            self.request_stats[request_id]["blocks"] += num_blocks
+            self.request_stats[request_id]["misses"] += num_blocks
+            
+            # Mark this request as having a miss if it's the first miss
+            if self.request_stats[request_id]["misses"] == num_blocks:
+                self.requests_with_misses += 1
+
+    def record_eviction(self, num_blocks: int, request_id=None):
+        # Update block-level statistics
+        self.total_evictions += num_blocks
+
+        # Update request-level statistics if request_id is provided
+        if request_id is not None:
+            # Register as a new unique request if not seen before
+            if request_id not in self.tracked_requests:
+                self.unique_requests += 1
+                self.tracked_requests.add(request_id)
+            
+            # Update per-request statistics
+            self.request_stats[request_id]["evictions"] += num_blocks
+            
+            # Mark this request as having an eviction if it's the first eviction
+            if self.request_stats[request_id]["evictions"] == num_blocks:
+                self.requests_with_evictions += 1
+
+    def get_hit_rate(self) -> float:
+
+        if self.total_blocks > 0:
+            return self.total_hits / self.total_blocks
+        return 0.0
+
+    def get_miss_rate(self) -> float:
+
+        if self.total_blocks > 0:
+            return self.total_misses / self.total_blocks
+        return 0.0
+
+    def get_all_stats(self) -> Dict:
+
+        hit_rate = self.get_hit_rate()
+        miss_rate = self.get_miss_rate()
+
+        return {
+            "block_level": {
+                "total_blocks": self.total_blocks,
+                "hits": self.total_hits,
+                "misses": self.total_misses,
+                "hit_rate": hit_rate,
+                "miss_rate": miss_rate,
+                "evictions": self.total_evictions,
+            },
+            "request_level": {
+                "unique_requests": self.unique_requests,
+                "requests_with_hits": self.requests_with_hits,
+                "requests_with_misses": self.requests_with_misses,
+                "requests_with_evictions": self.requests_with_evictions,
+                "hit_rate": self.requests_with_hits / self.unique_requests if self.unique_requests > 0 else 0.0,
+                "miss_rate": self.requests_with_misses / self.unique_requests if self.unique_requests > 0 else 0.0,
+            },
+            "cache_type": self.cache_type,
+            "page_size": self.page_size,
+            "timestamp": time.time(),
+        }
+
+    def record_stats(self):
+        # write to disk
+        stats = self.get_all_stats()
+        with open(f"cache_telemetry_{self.cache_type}.json", "w") as f:
+            json.dump(stats, f, indent=4)
+        print(f"[DEBUG] CacheTelemetry: Recorded stats!")
 
 
 class HiCacheController:

@@ -20,6 +20,7 @@ The radix tree data structure for managing the KV cache.
 """
 
 import heapq
+import threading
 import time
 from collections import defaultdict
 from functools import partial
@@ -30,6 +31,7 @@ import torch
 from sglang.srt.managers.schedule_batch import global_server_args_dict
 from sglang.srt.mem_cache.base_prefix_cache import BasePrefixCache
 from sglang.srt.mem_cache.memory_pool import ReqToTokenPool, TokenToKVPoolAllocator
+from sglang.srt.managers.cache_controller import CacheTelemetry
 
 if TYPE_CHECKING:
     from sglang.srt.managers.schedule_batch import Req
@@ -90,17 +92,38 @@ def _key_match_paged(key0: List, key1: List, page_size: int):
 
 
 class RadixCache(BasePrefixCache):
+    # only one telemetry thread runs across all instances
+    _telemetry_thread = None
+    _telemetry_stop_event = None
+    _telemetry_interval = 5
+
     def __init__(
         self,
         req_to_token_pool: ReqToTokenPool,
         token_to_kv_pool_allocator: TokenToKVPoolAllocator,
         page_size: int,
         disable: bool = False,
+        radix_telemetry: bool = True,
     ):
         self.req_to_token_pool = req_to_token_pool
+        print("[DEBUG] RadixCache: req_to_token_pool", req_to_token_pool)
         self.token_to_kv_pool_allocator = token_to_kv_pool_allocator
         self.page_size = page_size
         self.disable = disable
+
+        if radix_telemetry:
+            self.cache_telemetry = CacheTelemetry(page_size, "radix")
+        
+        # start a telemetry thread if one isn't already running
+        if RadixCache._telemetry_thread is None or not RadixCache._telemetry_thread.is_alive():
+            RadixCache._telemetry_interval = 5
+            RadixCache._telemetry_stop_event = threading.Event()
+            RadixCache._telemetry_thread = threading.Thread(
+                target=self._telemetry_thread_func,
+                daemon=True,
+            )
+            RadixCache._telemetry_thread.start()
+            print("[DEBUG] Started new telemetry thread")
 
         if self.token_to_kv_pool_allocator:
             self.device = self.token_to_kv_pool_allocator.device
@@ -118,6 +141,12 @@ class RadixCache(BasePrefixCache):
     ##### Public API #####
 
     def reset(self):
+        """Reset the radix tree."""
+        # reset telemetry counters
+        if hasattr(self, 'cache_telemetry'):
+            self.cache_telemetry.reset()
+        
+        # Reset the tree
         self.root_node = TreeNode()
         self.root_node.key = []
         self.root_node.value = []
@@ -268,6 +297,14 @@ class RadixCache(BasePrefixCache):
 
             self.token_to_kv_pool_allocator.free(x.value)
             num_evicted += len(x.value)
+            
+            # cache eviction
+            if self.page_size == 1:
+                num_blocks_evicted = len(x.value)
+            else:
+                num_blocks_evicted = (len(x.value) + self.page_size - 1) // self.page_size
+            self.cache_telemetry.record_eviction(num_blocks_evicted)
+            
             self._delete_leaf(x)
 
             if len(x.parent.children) == 0:
@@ -372,6 +409,14 @@ class RadixCache(BasePrefixCache):
             node = node.children[child_key]
             node.last_access_time = time.time()
             prefix_len = self.key_match_fn(node.key, key)
+            
+            # cache hit
+            if self.page_size == 1:
+                num_blocks_hit = prefix_len
+            else:
+                num_blocks_hit = (prefix_len + self.page_size - 1) // self.page_size
+            self.cache_telemetry.record_hit(num_blocks_hit)
+            
             total_prefix_length += prefix_len
             key = key[prefix_len:]
             value = value[prefix_len:]
@@ -384,6 +429,13 @@ class RadixCache(BasePrefixCache):
                 child_key = self.get_child_key_fn(key)
 
         if len(key):
+            # cache miss
+            if self.page_size == 1:
+                num_blocks_missed = len(key)
+            else:
+                num_blocks_missed = (len(key) + self.page_size - 1) // self.page_size
+            self.cache_telemetry.record_miss(num_blocks_missed)
+            
             new_node = TreeNode()
             new_node.parent = node
             new_node.key = key
@@ -441,6 +493,16 @@ class RadixCache(BasePrefixCache):
                 stack.extend(cur_node.children.values())
 
         return ret_list
+
+    def _telemetry_thread_func(self):
+        while not RadixCache._telemetry_stop_event.is_set():
+            try:
+                self.cache_telemetry.record_stats()
+            except Exception as e:
+                print(f"Error in telemetry recording: {e}")
+            
+            # Sleep for the specified interval
+            time.sleep(RadixCache._telemetry_interval)
 
 
 if __name__ == "__main__":
