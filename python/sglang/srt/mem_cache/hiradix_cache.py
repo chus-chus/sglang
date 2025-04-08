@@ -28,6 +28,7 @@ class HiRadixCache(RadixCache):
         tp_cache_group: torch.distributed.ProcessGroup,
         page_size: int,
         hicache_ratio: float,
+        enable_cache_telemetry: bool = False,
     ):
         self.kv_cache = token_to_kv_pool_allocator.get_kvcache()
         if isinstance(self.kv_cache, MHATokenToKVPool):
@@ -43,6 +44,7 @@ class HiRadixCache(RadixCache):
 
         self.tp_group = tp_cache_group
 
+        self.enable_cache_telemetry = enable_cache_telemetry
         self.load_cache_event = threading.Event()
         self.cache_controller = HiCacheController(
             token_to_kv_pool_allocator,
@@ -59,9 +61,10 @@ class HiRadixCache(RadixCache):
         self.write_through_threshold = 1
         self.load_back_threshold = 10
         super().__init__(
-            req_to_token_pool, token_to_kv_pool_allocator, page_size, disable=False, radix_telemetry=False,
+            req_to_token_pool, token_to_kv_pool_allocator, page_size, disable=False, enable_cache_telemetry=self.enable_cache_telemetry,
         )
-        self.cache_telemetry = CacheTelemetry(page_size, "hiradix")
+        if self.enable_cache_telemetry:
+            self.cache_telemetry = CacheTelemetry(page_size, "hiradix")
 
     def reset(self):
         # reset telemetry counters
@@ -167,12 +170,13 @@ class HiRadixCache(RadixCache):
             else:
                 num_evicted += self._evict_write_through(x)
 
-            # cache eviction
-            if self.page_size == 1:
-                num_blocks_evicted = len(x.value)
-            else:
-                num_blocks_evicted = (len(x.value) + self.page_size - 1) // self.page_size
-            self.cache_telemetry.record_eviction(num_blocks_evicted)
+            if self.enable_cache_telemetry:
+                # cache eviction
+                if self.page_size == 1:
+                    num_blocks_evicted = len(x.value)
+                else:
+                    num_blocks_evicted = (len(x.value) + self.page_size - 1) // self.page_size
+                self.cache_telemetry.record_eviction(num_blocks_evicted)
 
             for child in x.parent.children.values():
                 if child in pending_nodes:
@@ -383,7 +387,7 @@ class HiRadixCache(RadixCache):
         child.key = child.key[split_len:]
         new_node.parent.children[self.get_child_key_fn(key)] = new_node
         return new_node
-
+        
     def _insert_helper(self, node: TreeNode, key: List, value, rid: str = None):
         node.last_access_time = time.time()
         if len(key) == 0:
@@ -397,12 +401,13 @@ class HiRadixCache(RadixCache):
             node.last_access_time = time.time()
             prefix_len = self.key_match_fn(node.key, key)
 
-            # cache hit
-            if self.page_size == 1:
-                num_blocks_hit = prefix_len
-            else:
-                num_blocks_hit = (prefix_len + self.page_size - 1) // self.page_size
-            self.cache_telemetry.record_hit(num_blocks_hit, rid)
+            if self.enable_cache_telemetry and prefix_len > 0:
+                # cache hit
+                if self.page_size == 1:
+                    num_blocks_hit = prefix_len
+                else:
+                    num_blocks_hit = (prefix_len + self.page_size - 1) // self.page_size
+                self.cache_telemetry.record_hit(num_blocks_hit, rid)
         
             if prefix_len == len(node.key):
                 if node.evicted:
@@ -433,12 +438,13 @@ class HiRadixCache(RadixCache):
                 child_key = self.get_child_key_fn(key)
 
         if len(key):
-            # cache miss
-            if self.page_size == 1:
-                num_blocks_missed = len(key)
-            else:
-                num_blocks_missed = (len(key) + self.page_size - 1) // self.page_size
-            self.cache_telemetry.record_miss(num_blocks_missed, rid)
+            if self.enable_cache_telemetry:
+                # cache miss
+                if self.page_size == 1:
+                    num_blocks_missed = len(key)
+                else:
+                    num_blocks_missed = (len(key) + self.page_size - 1) // self.page_size
+                self.cache_telemetry.record_miss(num_blocks_missed, rid)
             
             new_node = TreeNode()
             new_node.parent = node

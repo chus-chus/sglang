@@ -17,11 +17,10 @@ import concurrent.futures
 import json
 import logging
 import math
-import time
 import threading
 from collections import defaultdict
 from queue import Empty, Full, PriorityQueue, Queue
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import datetime
 
 import torch
@@ -159,7 +158,6 @@ class CacheTelemetry:
         self.reset()
 
     def reset(self):
-        """Reset all telemetry counters."""
         print("[DEBUG] CacheTelemetry: Resetting all telemetry counters")
         
         # block
@@ -242,7 +240,7 @@ class CacheTelemetry:
                 "unique_requests": self.unique_requests,
                 "requests_with_hits": self.requests_with_hits,
                 "requests_with_misses": self.requests_with_misses,
-                "requests_with_evictions": self.requests_with_evictions,
+                # "requests_with_evictions": self.requests_with_evictions,
                 "hit_rate": self.requests_with_hits / self.unique_requests if self.unique_requests > 0 else 0.,
                 "miss_rate": self.requests_with_misses / self.unique_requests if self.unique_requests > 0 else 0.,
             },
@@ -254,9 +252,9 @@ class CacheTelemetry:
     def record_stats(self):
         # write to disk
         stats = self.get_all_stats()
-        with open(f"cache_telemetry_{self.cache_type}.json", "w") as f:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        with open(f"cache_telemetry_output/cache_telemetry_{self.cache_type}_{timestamp}.json", "w") as f:
             json.dump(stats, f, indent=4)
-        print(f"[DEBUG] CacheTelemetry: Recorded stats!")
 
 
 class HiCacheController:

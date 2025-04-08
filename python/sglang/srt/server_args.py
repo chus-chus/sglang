@@ -103,6 +103,7 @@ class ServerArgs:
     api_key: Optional[str] = None
     file_storage_path: str = "sglang_storage"
     enable_cache_report: bool = False
+    enable_cache_telemetry: bool = False
     reasoning_parser: Optional[str] = None
 
     # Data parallelism
@@ -732,6 +733,11 @@ class ServerArgs:
             "--enable-cache-report",
             action="store_true",
             help="Return number of cached tokens in usage.prompt_tokens_details for each openai request.",
+        )
+        parser.add_argument(
+            "--enable-cache-telemetry",
+            action="store_true",
+            help="Enable cache telemetry.",
         )
         parser.add_argument(
             "--reasoning-parser",
