@@ -252,8 +252,7 @@ class CacheTelemetry:
     def record_stats(self):
         # write to disk
         stats = self.get_all_stats()
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        with open(f"cache_telemetry_output/cache_telemetry_{self.cache_type}_{timestamp}.json", "w") as f:
+        with open(f"cache_telemetry_output/cache_telemetry_{self.cache_type}.json", "w") as f:
             json.dump(stats, f, indent=4)
 
 
