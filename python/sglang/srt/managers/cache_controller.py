@@ -17,6 +17,7 @@ import concurrent.futures
 import json
 import logging
 import math
+import os
 import threading
 from collections import defaultdict
 from queue import Empty, Full, PriorityQueue, Queue
@@ -151,6 +152,8 @@ class CacheTelemetry:
     Track cache hit/miss statistics at both request and block levels.
     """
 
+    _file_lock = threading.Lock()
+
     def __init__(self, page_size: int, cache_type: str):
         print("[DEBUG] CacheTelemetry: Initializing telemetry tracking")
         self.page_size = page_size
@@ -250,10 +253,21 @@ class CacheTelemetry:
         }
 
     def record_stats(self):
-        # write to disk
+        # write to disk with safety measures
         stats = self.get_all_stats()
-        with open(f"cache_telemetry_output/cache_telemetry_{self.cache_type}.json", "w") as f:
-            json.dump(stats, f, indent=4)
+        
+        with CacheTelemetry._file_lock:
+            try:
+                output_dir = "cache_telemetry_output"
+                os.makedirs(output_dir, exist_ok=True)
+                
+                filepath = os.path.join(output_dir, f"cache_telemetry_{self.cache_type}.json")
+                
+                with open(filepath, "w") as f:
+                    json.dump(stats, f, indent=4)
+                    
+            except (IOError, OSError) as e:
+                logging.warning(f"Failed to write cache telemetry stats: {e}")
 
 
 class HiCacheController:
