@@ -486,6 +486,7 @@ class Scheduler(
                     hicache_ratio=server_args.hicache_ratio,
                     enable_cache_telemetry=server_args.enable_cache_telemetry,
                     cache_telemetry_output_dir=server_args.cache_telemetry_output_dir,
+                    reset_cache_telemetry_on_new_file=server_args.reset_cache_telemetry_on_new_file,
                 )
             else:
                 self.tree_cache = RadixCache(
@@ -495,6 +496,7 @@ class Scheduler(
                     disable=server_args.disable_radix_cache,
                     enable_cache_telemetry=server_args.enable_cache_telemetry,
                     cache_telemetry_output_dir=server_args.cache_telemetry_output_dir,
+                    reset_cache_telemetry_on_new_file=server_args.reset_cache_telemetry_on_new_file,
                 )
 
         self.decode_mem_cache_buf_multiplier = (

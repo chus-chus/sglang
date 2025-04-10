@@ -104,7 +104,8 @@ class ServerArgs:
     file_storage_path: str = "sglang_storage"
     enable_cache_report: bool = False
     enable_cache_telemetry: bool = False
-    cache_telemetry_output_dir: str = "sgl_cache_telemetry_output"
+    cache_telemetry_output_dir: str = "."
+    reset_cache_telemetry_on_new_file: bool = False
     reasoning_parser: Optional[str] = None
 
     # Data parallelism
@@ -746,6 +747,11 @@ class ServerArgs:
             type=str,
             default=ServerArgs.cache_telemetry_output_dir,
             help="The output directory for cache telemetry.",
+        )
+        parser.add_argument(
+            "--reset-cache-telemetry-on-new-file",
+            action="store_true",
+            help="Reset cache telemetry counters when the output file is rotated.",
         )
         parser.add_argument(
             "--reasoning-parser",

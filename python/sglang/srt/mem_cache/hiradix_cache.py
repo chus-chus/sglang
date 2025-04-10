@@ -30,6 +30,7 @@ class HiRadixCache(RadixCache):
         hicache_ratio: float,
         enable_cache_telemetry: bool = False,
         cache_telemetry_output_dir: Optional[str] = None,
+        reset_cache_telemetry_on_new_file: bool = False,
     ):
         self.kv_cache = token_to_kv_pool_allocator.get_kvcache()
         if isinstance(self.kv_cache, MHATokenToKVPool):
@@ -47,6 +48,7 @@ class HiRadixCache(RadixCache):
 
         self.enable_cache_telemetry = enable_cache_telemetry
         self.cache_telemetry_output_dir = cache_telemetry_output_dir
+        self.reset_cache_telemetry_on_new_file = reset_cache_telemetry_on_new_file
         self.load_cache_event = threading.Event()
         self.cache_controller = HiCacheController(
             token_to_kv_pool_allocator,
@@ -66,7 +68,7 @@ class HiRadixCache(RadixCache):
             req_to_token_pool, token_to_kv_pool_allocator, page_size, disable=False, enable_cache_telemetry=self.enable_cache_telemetry,
         )
         if self.enable_cache_telemetry:
-            self.cache_telemetry = CacheTelemetry(page_size, "hiradix", cache_telemetry_output_dir)
+            self.cache_telemetry = CacheTelemetry(page_size, "hiradix", cache_telemetry_output_dir, reset_cache_telemetry_on_new_file)
 
     def reset(self):
         # reset telemetry counters

@@ -106,6 +106,7 @@ class RadixCache(BasePrefixCache):
         disable: bool = False,
         enable_cache_telemetry: bool = False,
         cache_telemetry_output_dir: Optional[str] = None,
+        reset_cache_telemetry_on_new_file: bool = False,
     ):
         self.req_to_token_pool = req_to_token_pool
         self.token_to_kv_pool_allocator = token_to_kv_pool_allocator
@@ -113,8 +114,9 @@ class RadixCache(BasePrefixCache):
         self.disable = disable
         self.enable_cache_telemetry = enable_cache_telemetry
         self.cache_telemetry_output_dir = cache_telemetry_output_dir
+        self.reset_cache_telemetry_on_new_file = reset_cache_telemetry_on_new_file
         if self.enable_cache_telemetry:
-            self.cache_telemetry = CacheTelemetry(page_size, "radix", cache_telemetry_output_dir)
+            self.cache_telemetry = CacheTelemetry(page_size, "radix", cache_telemetry_output_dir, reset_cache_telemetry_on_new_file)
         
             # start a telemetry thread if one isn't already running
             if RadixCache._telemetry_thread is None or not RadixCache._telemetry_thread.is_alive():

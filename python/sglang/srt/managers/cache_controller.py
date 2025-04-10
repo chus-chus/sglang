@@ -154,10 +154,12 @@ class CacheTelemetry:
 
     _file_lock = threading.Lock()
 
-    def __init__(self, page_size: int, cache_type: str):
+    def __init__(self, page_size: int, cache_type: str, output_dir: str, reset_cache_telemetry_on_new_file: bool = False):
         print("[DEBUG] CacheTelemetry: Initializing telemetry tracking")
         self.page_size = page_size
         self.cache_type = cache_type
+        self.output_dir = os.path.join(output_dir, "sgl_cache_telemetry_output")
+        self.reset_cache_telemetry_on_new_file = reset_cache_telemetry_on_new_file # this is a hacky way to reset the counters when the output file is rotated
         self.reset()
 
     def reset(self):
@@ -235,8 +237,8 @@ class CacheTelemetry:
                 "total_blocks": self.total_blocks,
                 "hits": self.total_hits,
                 "misses": self.total_misses,
-                "hit_rate": self.total_hits / self.total_blocks,
-                "miss_rate": self.total_misses / self.total_blocks,
+                "hit_rate": self.total_hits / self.total_blocks if self.total_blocks > 0 else 0.,
+                "miss_rate": self.total_misses / self.total_blocks if self.total_blocks > 0 else 0.,
                 "evictions": self.total_evictions,
             },
             "request_level": {
@@ -260,8 +262,11 @@ class CacheTelemetry:
             try:
                 os.makedirs(self.output_dir, exist_ok=True)
                 
-                filepath = os.path.join(self.output_dir, f"cache_telemetry.json")
-                
+                filepath = os.path.join(self.output_dir, "cache_telemetry.json")
+
+                if not os.path.exists(filepath) and self.reset_cache_telemetry_on_new_file:
+                    self.reset()
+                    
                 with open(filepath, "w") as f:
                     json.dump(stats, f, indent=4)
                     
