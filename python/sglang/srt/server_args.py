@@ -104,6 +104,7 @@ class ServerArgs:
     file_storage_path: str = "sglang_storage"
     enable_cache_report: bool = False
     enable_cache_telemetry: bool = False
+    cache_telemetry_output_dir: str = "sgl_cache_telemetry_output"
     reasoning_parser: Optional[str] = None
 
     # Data parallelism
@@ -737,7 +738,14 @@ class ServerArgs:
         parser.add_argument(
             "--enable-cache-telemetry",
             action="store_true",
+            default=ServerArgs.enable_cache_telemetry,
             help="Enable cache telemetry.",
+        )
+        parser.add_argument(
+            "--cache-telemetry-output-dir",
+            type=str,
+            default=ServerArgs.cache_telemetry_output_dir,
+            help="The output directory for cache telemetry.",
         )
         parser.add_argument(
             "--reasoning-parser",

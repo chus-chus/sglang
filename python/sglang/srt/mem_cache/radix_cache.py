@@ -105,15 +105,16 @@ class RadixCache(BasePrefixCache):
         page_size: int,
         disable: bool = False,
         enable_cache_telemetry: bool = False,
+        cache_telemetry_output_dir: Optional[str] = None,
     ):
         self.req_to_token_pool = req_to_token_pool
         self.token_to_kv_pool_allocator = token_to_kv_pool_allocator
         self.page_size = page_size
         self.disable = disable
         self.enable_cache_telemetry = enable_cache_telemetry
-
+        self.cache_telemetry_output_dir = cache_telemetry_output_dir
         if self.enable_cache_telemetry:
-            self.cache_telemetry = CacheTelemetry(page_size, "radix")
+            self.cache_telemetry = CacheTelemetry(page_size, "radix", cache_telemetry_output_dir)
         
             # start a telemetry thread if one isn't already running
             if RadixCache._telemetry_thread is None or not RadixCache._telemetry_thread.is_alive():

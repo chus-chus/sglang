@@ -258,10 +258,9 @@ class CacheTelemetry:
         
         with CacheTelemetry._file_lock:
             try:
-                output_dir = "cache_telemetry_output"
-                os.makedirs(output_dir, exist_ok=True)
+                os.makedirs(self.output_dir, exist_ok=True)
                 
-                filepath = os.path.join(output_dir, f"cache_telemetry_{self.cache_type}.json")
+                filepath = os.path.join(self.output_dir, f"cache_telemetry.json")
                 
                 with open(filepath, "w") as f:
                     json.dump(stats, f, indent=4)

@@ -485,6 +485,7 @@ class Scheduler(
                     page_size=self.page_size,
                     hicache_ratio=server_args.hicache_ratio,
                     enable_cache_telemetry=server_args.enable_cache_telemetry,
+                    cache_telemetry_output_dir=server_args.cache_telemetry_output_dir,
                 )
             else:
                 self.tree_cache = RadixCache(
@@ -493,6 +494,7 @@ class Scheduler(
                     page_size=self.page_size,
                     disable=server_args.disable_radix_cache,
                     enable_cache_telemetry=server_args.enable_cache_telemetry,
+                    cache_telemetry_output_dir=server_args.cache_telemetry_output_dir,
                 )
 
         self.decode_mem_cache_buf_multiplier = (
