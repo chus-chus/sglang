@@ -221,6 +221,8 @@ class RadixCache(BasePrefixCache):
             page_aligned_len = len(kv_indices)
             page_aligned_kv_indices = kv_indices.clone()
 
+        #print(f"[DEBUG] Cache finished request: {req.origin_input_text}")
+
         # Radix Cache takes one ref in memory pool
         new_prefix_len = self.insert(
             token_ids[:page_aligned_len], page_aligned_kv_indices, req.rid
@@ -235,6 +237,7 @@ class RadixCache(BasePrefixCache):
 
     def cache_unfinished_req(self, req: Req):
         """Cache request when it is unfinished."""
+        #print(f"[DEBUG] Cache unfinished request: {req.origin_input_text}")
         if self.disable:
             return
 
@@ -422,6 +425,7 @@ class RadixCache(BasePrefixCache):
                 else:
                     num_blocks_hit = (prefix_len + self.page_size - 1) // self.page_size
                 self.cache_telemetry.record_hit(num_blocks_hit, rid)
+                # print(f"[DEBUG] Cache hit: {num_blocks_hit} blocks for request {rid}. Node key: {node.key}")
             
             total_prefix_length += prefix_len
             key = key[prefix_len:]

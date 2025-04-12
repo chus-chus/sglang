@@ -173,49 +173,40 @@ class CacheTelemetry:
         
         # requests
         self.unique_requests = 0
-        self.requests_with_hits = 0
-        self.requests_with_misses = 0
-        self.requests_with_evictions = 0
+        self.requests_with_hits = set()
+        self.requests_with_misses = set()
+        self.requests_with_evictions = set()
         
-        self.request_stats = defaultdict(
-            lambda: {
-                "blocks": 0,
-                "hits": 0,
-                "misses": 0,
-                "evictions": 0,
-            }
-        )
         self.tracked_requests = set()   # To keep track of unique request IDs
 
     def record_hit(self, num_blocks: int, request_id=None):
-        self.total_blocks += num_blocks
-        self.total_hits += num_blocks
-
+        num_blocks -= 1  # ignore the first block of all requests
         if request_id is not None:
             if request_id not in self.tracked_requests:
+                print(f"[DEBUG] CacheTelemetry: Tracking new request ID: {request_id}")
                 self.unique_requests += 1
                 self.tracked_requests.add(request_id)
-            
-            self.request_stats[request_id]["blocks"] += num_blocks
-            self.request_stats[request_id]["hits"] += num_blocks
-            
-            if self.request_stats[request_id]["hits"] == num_blocks:
-                self.requests_with_hits += 1
+            if num_blocks > 0 and request_id not in self.requests_with_hits:
+                self.requests_with_hits.add(request_id)
+
+        if num_blocks > 0:
+            # print(f"[DEBUG] HIT request_id: {request_id}, num_blocks: {num_blocks}")
+            self.total_blocks += num_blocks
+            self.total_hits += num_blocks
 
     def record_miss(self, num_blocks: int, request_id=None):
-        self.total_blocks += num_blocks
-        self.total_misses += num_blocks
-
         if request_id is not None:
             if request_id not in self.tracked_requests:
                 self.unique_requests += 1
                 self.tracked_requests.add(request_id)
-            
-            self.request_stats[request_id]["blocks"] += num_blocks
-            self.request_stats[request_id]["misses"] += num_blocks
-            
-            if self.request_stats[request_id]["misses"] == num_blocks:
-                self.requests_with_misses += 1
+            if request_id not in self.requests_with_misses:
+                self.requests_with_misses.add(request_id)
+        
+        num_blocks -= 1  # ignore the first block of all requests
+        if num_blocks > 0:
+            # print(f"[DEBUG] MISS request_id: {request_id}, num_blocks: {num_blocks}")
+            self.total_blocks += num_blocks
+            self.total_misses += num_blocks
 
     def record_eviction(self, num_blocks: int, request_id=None):
         self.total_evictions += num_blocks
@@ -224,11 +215,9 @@ class CacheTelemetry:
             if request_id not in self.tracked_requests:
                 self.unique_requests += 1
                 self.tracked_requests.add(request_id)
-            
-            self.request_stats[request_id]["evictions"] += num_blocks
-            
-            if self.request_stats[request_id]["evictions"] == num_blocks:
-                self.requests_with_evictions += 1
+            # this path is dead as of now
+            if request_id not in self.requests_with_evictions:
+                self.requests_with_evictions.add(request_id)
 
     def get_all_stats(self) -> Dict:
 
@@ -237,17 +226,17 @@ class CacheTelemetry:
                 "total_blocks": self.total_blocks,
                 "hits": self.total_hits,
                 "misses": self.total_misses,
+                "evictions": self.total_evictions,
                 "hit_rate": self.total_hits / self.total_blocks if self.total_blocks > 0 else 0.,
                 "miss_rate": self.total_misses / self.total_blocks if self.total_blocks > 0 else 0.,
-                "evictions": self.total_evictions,
             },
             "request_level": {
                 "unique_requests": self.unique_requests,
-                "requests_with_hits": self.requests_with_hits,
-                "requests_with_misses": self.requests_with_misses,
-                # "requests_with_evictions": self.requests_with_evictions,
-                "hit_rate": self.requests_with_hits / self.unique_requests if self.unique_requests > 0 else 0.,
-                "miss_rate": self.requests_with_misses / self.unique_requests if self.unique_requests > 0 else 0.,
+                "hits": len(self.requests_with_hits),
+                "misses": len(self.requests_with_misses),
+                "evictions": len(self.requests_with_evictions),
+                "hit_rate": len(self.requests_with_hits) / self.unique_requests if self.unique_requests > 0 else 0.,
+                "miss_rate": len(self.requests_with_misses) / self.unique_requests if self.unique_requests > 0 else 0.,
             },
             "cache_type": self.cache_type,
             "page_size": self.page_size,
