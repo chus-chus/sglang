@@ -532,7 +532,7 @@ class Req:
             if enable_hierarchical_cache:
                 self.prefix_indices, self.last_node, self.last_node_global = (
                     tree_cache.match_prefix(
-                        key=self.adjust_max_prefix_ids(), include_evicted=True
+                        key=self.adjust_max_prefix_ids(), include_evicted=True, rid=self.rid
                     )
                 )
             else:

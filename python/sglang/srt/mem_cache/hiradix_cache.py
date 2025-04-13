@@ -31,6 +31,7 @@ class HiRadixCache(RadixCache):
         enable_cache_telemetry: bool = False,
         cache_telemetry_output_dir: Optional[str] = None,
         reset_cache_telemetry_on_new_file: bool = False,
+        write_policy: str = "write_through_selective",
     ):
         self.kv_cache = token_to_kv_pool_allocator.get_kvcache()
         if isinstance(self.kv_cache, MHATokenToKVPool):
@@ -55,6 +56,7 @@ class HiRadixCache(RadixCache):
             self.token_to_kv_pool_host,
             page_size,
             load_cache_event=self.load_cache_event,
+            write_policy=write_policy,
         )
         
         # record the nodes with ongoing write through
@@ -163,20 +165,22 @@ class HiRadixCache(RadixCache):
 
             if x.host_value is None:
                 if self.cache_controller.write_policy == "write_back":
-                    num_evicted += self.write_backup(x)
+                    to_evict = self.write_backup(x)
                 elif self.cache_controller.write_policy == "write_through_selective":
-                    num_evicted += self._evict_write_through_selective(x)
+                    to_evict = self._evict_write_through_selective(x)
                 else:
                     assert (
                         self.cache_controller.write_policy != "write_through"
                     ), "write_through should be inclusive"
                     raise NotImplementedError
             else:
-                num_evicted += self._evict_write_through(x)
+                to_evict = self._evict_write_through(x)
+
+            num_evicted += to_evict
 
             if self.enable_cache_telemetry:
                 # cache eviction
-                num_blocks_evicted = len(x.value) / self.page_size
+                num_blocks_evicted = to_evict / self.page_size
                 self.cache_telemetry.record_eviction(num_blocks_evicted)
 
             for child in x.parent.children.values():
@@ -313,7 +317,7 @@ class HiRadixCache(RadixCache):
     def ready_to_load_cache(self):
         self.load_cache_event.set()
 
-    def match_prefix(self, key: List[int], include_evicted=False, **kwargs):
+    def match_prefix(self, key: List[int], rid: Optional[str] = None, include_evicted=False, **kwargs):
         import inspect
         should_log_telemetry = inspect.currentframe().f_back.f_code.co_name == "init_next_round_input"
 
@@ -335,14 +339,14 @@ class HiRadixCache(RadixCache):
             if should_log_telemetry and self.enable_cache_telemetry:
                 # cache hit
                 num_blocks_hit = len(value) / self.page_size
-                self.cache_telemetry.record_hit(num_blocks_hit)
+                self.cache_telemetry.record_hit(num_blocks_hit, rid)
         else:
             value = empty_value
 
         if should_log_telemetry and self.enable_cache_telemetry and len(key) - len(value) > 0:
             # cache miss
             num_blocks_missed = (len(key) - len(value)) / self.page_size
-            self.cache_telemetry.record_miss(num_blocks_missed)
+            self.cache_telemetry.record_miss(num_blocks_missed, rid)
 
         last_node_global = last_node
         while last_node.evicted:

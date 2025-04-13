@@ -158,7 +158,7 @@ class RadixCache(BasePrefixCache):
         self.evictable_size_ = 0
         self.protected_size_ = 0
 
-    def match_prefix(self, key: List[int], **kwargs) -> Tuple[torch.Tensor, int]:
+    def match_prefix(self, key: List[int], rid: Optional[str] = None) -> Tuple[torch.Tensor, int]:
         """Find the matching prefix from the radix tree.
         Args:
             key: A list of token IDs to find a matching prefix.
@@ -193,14 +193,14 @@ class RadixCache(BasePrefixCache):
             if should_log_telemetry and self.enable_cache_telemetry:
                 # cache hit
                 num_blocks_hit = len(value) / self.page_size
-                self.cache_telemetry.record_hit(num_blocks_hit)
+                self.cache_telemetry.record_hit(num_blocks_hit, rid)
         else:
             value = torch.empty((0,), dtype=torch.int64, device=self.device)
 
         if should_log_telemetry and self.enable_cache_telemetry and len(key) - len(value) > 0:
             # cache miss
             num_blocks_missed = (len(key) - len(value)) / self.page_size
-            self.cache_telemetry.record_miss(num_blocks_missed)
+            self.cache_telemetry.record_miss(num_blocks_missed, rid)
 
         return value, last_node
 
