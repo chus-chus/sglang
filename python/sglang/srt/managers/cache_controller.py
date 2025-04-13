@@ -180,13 +180,12 @@ class CacheTelemetry:
         self.tracked_requests = set()   # To keep track of unique request IDs
 
     def record_hit(self, num_blocks: int, request_id=None):
-        num_blocks -= 1  # ignore the first block of all requests
         if request_id is not None:
             if request_id not in self.tracked_requests:
                 print(f"[DEBUG] CacheTelemetry: Tracking new request ID: {request_id}")
                 self.unique_requests += 1
                 self.tracked_requests.add(request_id)
-            if num_blocks > 0 and request_id not in self.requests_with_hits:
+            if request_id not in self.requests_with_hits:
                 self.requests_with_hits.add(request_id)
 
         if num_blocks > 0:
@@ -202,7 +201,6 @@ class CacheTelemetry:
             if request_id not in self.requests_with_misses:
                 self.requests_with_misses.add(request_id)
         
-        num_blocks -= 1  # ignore the first block of all requests
         if num_blocks > 0:
             # print(f"[DEBUG] MISS request_id: {request_id}, num_blocks: {num_blocks}")
             self.total_blocks += num_blocks

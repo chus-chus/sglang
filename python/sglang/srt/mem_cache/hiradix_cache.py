@@ -176,10 +176,7 @@ class HiRadixCache(RadixCache):
 
             if self.enable_cache_telemetry:
                 # cache eviction
-                if self.page_size == 1:
-                    num_blocks_evicted = len(x.value)
-                else:
-                    num_blocks_evicted = (len(x.value) + self.page_size - 1) // self.page_size
+                num_blocks_evicted = len(x.value) / self.page_size
                 self.cache_telemetry.record_eviction(num_blocks_evicted)
 
             for child in x.parent.children.values():
@@ -317,6 +314,9 @@ class HiRadixCache(RadixCache):
         self.load_cache_event.set()
 
     def match_prefix(self, key: List[int], include_evicted=False, **kwargs):
+        import inspect
+        should_log_telemetry = inspect.currentframe().f_back.f_code.co_name == "init_next_round_input"
+
         empty_value = torch.empty((0,), dtype=torch.int64, device=self.device)
         if self.disable or len(key) == 0:
             if include_evicted:
@@ -329,10 +329,20 @@ class HiRadixCache(RadixCache):
             key = key[:page_aligned_len]
 
         value, last_node = self._match_prefix_helper(self.root_node, key)
+
         if value:
             value = torch.cat(value)
+            if should_log_telemetry and self.enable_cache_telemetry:
+                # cache hit
+                num_blocks_hit = len(value) / self.page_size
+                self.cache_telemetry.record_hit(num_blocks_hit)
         else:
             value = empty_value
+
+        if should_log_telemetry and self.enable_cache_telemetry and len(key) - len(value) > 0:
+            # cache miss
+            num_blocks_missed = (len(key) - len(value)) / self.page_size
+            self.cache_telemetry.record_miss(num_blocks_missed)
 
         last_node_global = last_node
         while last_node.evicted:
@@ -404,14 +414,6 @@ class HiRadixCache(RadixCache):
             node = node.children[child_key]
             node.last_access_time = time.time()
             prefix_len = self.key_match_fn(node.key, key)
-
-            if self.enable_cache_telemetry and prefix_len > 0:
-                # cache hit
-                if self.page_size == 1:
-                    num_blocks_hit = prefix_len
-                else:
-                    num_blocks_hit = (prefix_len + self.page_size - 1) // self.page_size
-                self.cache_telemetry.record_hit(num_blocks_hit, rid)
         
             if prefix_len == len(node.key):
                 if node.evicted:
@@ -442,14 +444,6 @@ class HiRadixCache(RadixCache):
                 child_key = self.get_child_key_fn(key)
 
         if len(key):
-            if self.enable_cache_telemetry:
-                # cache miss
-                if self.page_size == 1:
-                    num_blocks_missed = len(key)
-                else:
-                    num_blocks_missed = (len(key) + self.page_size - 1) // self.page_size
-                self.cache_telemetry.record_miss(num_blocks_missed, rid)
-            
             new_node = TreeNode()
             new_node.parent = node
             new_node.key = key
