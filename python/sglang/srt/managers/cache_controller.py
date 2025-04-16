@@ -203,8 +203,6 @@ class CacheTelemetry:
 
     def record_hit(self, num_blocks: int = 0, request_id=None):
         # print who called this function
-        import inspect
-        caller = inspect.currentframe().f_back.f_code.co_name
         # logger.info(f"[DEBUG] CacheTelemetry hit: req {request_id}, new blocks {num_blocks}, caller {caller}")
         if request_id is not None:
             if request_id not in self.tracked_requests:
