@@ -107,6 +107,9 @@ class HiRadixCache(RadixCache):
         else:
             return None
 
+        if self.enable_cache_telemetry:
+            # cache write to host
+            self.cache_telemetry.record_host_write(len(host_indices) / self.page_size)
         return len(host_indices)
 
     def inc_hit_count(self, node: TreeNode):
@@ -194,9 +197,14 @@ class HiRadixCache(RadixCache):
 
         if self.cache_controller.write_policy == "write_back":
             # blocking till all write back complete
+            if self.enable_cache_telemetry:
+                block_start_time = time.time()
             while len(self.ongoing_write_through) > 0:
                 self.writing_check()
                 time.sleep(0.1)
+            if self.enable_cache_telemetry:
+                block_end_time = time.time()
+                self.cache_controller.increment_write_back_time(block_end_time - block_start_time)
 
     def _evict_write_through(self, node: TreeNode):
         # evict a node already written to host
@@ -286,6 +294,13 @@ class HiRadixCache(RadixCache):
         self.evictable_size_ += len(device_indices)
         self.inc_lock_ref(last_hit_node)
 
+        print(f"[DEBUG] HiRadixCache: load back {len(device_indices) / self.page_size} blocks")
+
+        if self.enable_cache_telemetry:
+            # cache hit (on host)
+            print(f"[DEBUG] HiRadixCache: record hit {len(device_indices) / self.page_size}")
+            self.cache_telemetry.record_host_hit(len(device_indices) / self.page_size)
+
         return device_indices
 
     def init_load_back(
@@ -294,6 +309,7 @@ class HiRadixCache(RadixCache):
         prefix_indices: torch.Tensor,
         mem_quota: Optional[int] = None,
     ):
+        print(f"[DEBUG] HiRadixCache: init load back {len(prefix_indices) / self.page_size} blocks")
         assert (
             len(prefix_indices) == 0 or prefix_indices.is_cuda
         ), "indices of device kV caches should be on GPU"
@@ -370,11 +386,21 @@ class HiRadixCache(RadixCache):
                 new_node = self._split_node(child.key, child, prefix_len)
                 if not new_node.evicted:
                     value.append(new_node.value)
+                    # device_hits += len(new_node.value)
+                    # print(f"[DEBUG] new_node.value: {new_node.value}")
+                    # print(f"[DEBUG] new_node.host_value: {new_node.host_value}")
+                    # if new_node.host_value is not None:
+                    #     host_hits += torch.isin(new_node.value, new_node.host_value).sum().item()
                 node = new_node
                 break
             else:
                 if not child.evicted:
                     value.append(child.value)
+                    # device_hits += len(child.value)
+                    # print(f"[DEBUG] child.value: {child.value}")
+                    # print(f"[DEBUG] child.host_value: {child.host_value}")
+                    # if child.host_value is not None:
+                    #     host_hits += torch.isin(child.value.cpu(), child.host_value).sum().item()
                 node = child
                 key = key[prefix_len:]
 

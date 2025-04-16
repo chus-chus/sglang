@@ -550,6 +550,12 @@ class ServerArgs:
             help="Whether to use a CausalLM as an embedding model.",
         )
         parser.add_argument(
+            "--hiradix-write-policy",
+            type=str,
+            default=ServerArgs.hiradix_write_policy,
+            help="The write policy for HiRadixCache.",
+        )
+        parser.add_argument(
             "--revision",
             type=str,
             default=None,

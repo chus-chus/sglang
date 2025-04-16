@@ -24,6 +24,7 @@ import threading
 import time
 from collections import defaultdict
 from functools import partial
+import logging
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import torch
@@ -36,6 +37,7 @@ from sglang.srt.managers.cache_controller import CacheTelemetry
 if TYPE_CHECKING:
     from sglang.srt.managers.schedule_batch import Req
 
+logger = logging.getLogger(__name__)
 
 class TreeNode:
 
@@ -172,6 +174,8 @@ class RadixCache(BasePrefixCache):
         import inspect
         should_log_telemetry = inspect.currentframe().f_back.f_code.co_name == "init_next_round_input"
 
+        original_key_len = len(key)
+
         if self.disable or len(key) == 0:
             return (
                 torch.empty(
@@ -190,16 +194,18 @@ class RadixCache(BasePrefixCache):
 
         if value:
             value = torch.cat(value)
+            logger.info(f"RadixCache: should log telemetry {should_log_telemetry}, enable cache tel: {self.enable_cache_telemetry}")
             if should_log_telemetry and self.enable_cache_telemetry:
                 # cache hit
                 num_blocks_hit = len(value) / self.page_size
+                logger.info(f"[DEBUG] RadixCache: Cache hit: {len(value)} for request {rid}. Blocks {num_blocks_hit}")
                 self.cache_telemetry.record_hit(num_blocks_hit, rid)
         else:
             value = torch.empty((0,), dtype=torch.int64, device=self.device)
 
-        if should_log_telemetry and self.enable_cache_telemetry and len(key) - len(value) > 0:
+        if should_log_telemetry and self.enable_cache_telemetry and original_key_len - len(value) > 0:
             # cache miss
-            num_blocks_missed = (len(key) - len(value)) / self.page_size
+            num_blocks_missed = (original_key_len - len(value)) / self.page_size
             self.cache_telemetry.record_miss(num_blocks_missed, rid)
 
         return value, last_node

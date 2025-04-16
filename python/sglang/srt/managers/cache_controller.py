@@ -162,6 +162,7 @@ class CacheTelemetry:
         self.output_dir = output_dir
         self.reset_cache_telemetry_on_new_file = reset_cache_telemetry_on_new_file # this is a hacky way to reset the counters when the output file is rotated
         self.init_time = time.time()
+        self.time_in_write_back = 0
         self.reset()
 
     def reset(self):
@@ -173,12 +174,16 @@ class CacheTelemetry:
         self.total_misses = 0
         self.total_evictions = 0
         self.first_block = True
+        self.host_hits = 0
+        self.written_blocks_host = 0
 
         # block (time series)
         self.total_blocks_ts = [] # (timestamp, num_blocks)
         self.total_hits_ts = [] # (timestamp, num_hits)
         self.total_misses_ts = [] # (timestamp, num_misses)
         self.total_evictions_ts = [] # (timestamp, num_evictions)
+        self.host_hits_ts = [] # (timestamp, num_hits)
+        self.written_blocks_host_ts = [] # (timestamp, num_blocks)
         
         # requests
         self.unique_requests = 0
@@ -186,7 +191,7 @@ class CacheTelemetry:
         self.requests_with_misses = set()
         self.requests_with_evictions = set()
         
-        self.tracked_requests = set()   # To keep track of unique request IDs
+        self.tracked_requests = set() # keep track of unique request IDs
 
         # requests (time series)
         self.unique_requests_ts = [] # (timestamp, num_requests)
@@ -196,31 +201,36 @@ class CacheTelemetry:
 
         self.init_time = time.time()
 
-    def record_hit(self, num_blocks: int, request_id=None):
-        if self.first_block:
-            # ignore first block because it will always hit
-            self.first_block = False
-            return
-
+    def record_hit(self, num_blocks: int = 0, request_id=None):
+        # print who called this function
+        import inspect
+        caller = inspect.currentframe().f_back.f_code.co_name
+        # logger.info(f"[DEBUG] CacheTelemetry hit: req {request_id}, new blocks {num_blocks}, caller {caller}")
         if request_id is not None:
             if request_id not in self.tracked_requests:
-                print(f"[DEBUG] CacheTelemetry: Tracking new request ID: {request_id}")
+                # print(f"[DEBUG] CacheTelemetry: Tracking new request ID: {request_id}")
                 self.unique_requests += 1
                 self.tracked_requests.add(request_id)
                 self.unique_requests_ts.append((time.time() - self.init_time, 1))
-            if request_id not in self.requests_with_hits:
                 self.requests_with_hits.add(request_id)
                 self.requests_with_hits_ts.append((time.time() - self.init_time, 1))
+                num_blocks -= 1
 
         if num_blocks > 0:
-            # print(f"[DEBUG] HIT request_id: {request_id}, num_blocks: {num_blocks}")
+            # logger.info(f"[DEBUG] CacheTelemetry: req {request_id} logged new blocks (+{num_blocks})")
             self.total_blocks += num_blocks
             self.total_hits += num_blocks
-            
             # record time series
             timestamp = time.time() - self.init_time
             self.total_blocks_ts.append((timestamp, num_blocks))
             self.total_hits_ts.append((timestamp, num_blocks))
+
+    def record_host_hit(self, num_blocks: int = 0):        
+        if num_blocks > 0:
+            self.host_hits += num_blocks
+            # record time series
+            timestamp = time.time() - self.init_time
+            self.host_hits_ts.append((timestamp, num_blocks))
 
     def record_miss(self, num_blocks: int, request_id=None):
         if request_id is not None:
@@ -228,12 +238,10 @@ class CacheTelemetry:
                 self.unique_requests += 1
                 self.tracked_requests.add(request_id)
                 self.unique_requests_ts.append((time.time() - self.init_time, 1))
-            if request_id not in self.requests_with_misses:
                 self.requests_with_misses.add(request_id)
                 self.requests_with_misses_ts.append((time.time() - self.init_time, 1))
         
         if num_blocks > 0:
-            # print(f"[DEBUG] MISS request_id: {request_id}, num_blocks: {num_blocks}")
             self.total_blocks += num_blocks
             self.total_misses += num_blocks
 
@@ -254,13 +262,21 @@ class CacheTelemetry:
                 self.unique_requests += 1
                 self.tracked_requests.add(request_id)
                 self.unique_requests_ts.append((timestamp, 1))
-            # this path is dead as of now
-            if request_id not in self.requests_with_evictions:
                 self.requests_with_evictions.add(request_id)
                 self.requests_with_evictions_ts.append((timestamp, 1))
 
             # record time series
             self.requests_with_evictions_ts.append((timestamp, num_blocks))
+
+    def record_host_write(self, num_blocks: int):
+        self.written_blocks_host += num_blocks
+        
+        # record time series
+        timestamp = time.time() - self.init_time
+        self.written_blocks_host_ts.append((timestamp, num_blocks))
+
+    def increment_write_back_time(self, time):
+        self.time_in_write_back += time
 
     def get_all_stats(self) -> Dict:
 
@@ -270,8 +286,12 @@ class CacheTelemetry:
                 "hits": self.total_hits if self.total_hits > 0 else 0,
                 "misses": self.total_misses,
                 "evictions": self.total_evictions,
+                "host_hits": self.host_hits,
+                "device_hits": self.total_hits - self.host_hits,
                 "hit_rate": self.total_hits / self.total_blocks if self.total_blocks > 0 else 0.,
                 "miss_rate": self.total_misses / self.total_blocks if self.total_blocks > 0 else 0.,
+                "host_hit_rate": self.host_hits / self.total_hits if self.total_hits > 0 else 0.,
+                "device_hit_rate": (self.total_hits - self.host_hits) / self.total_hits if self.total_hits > 0 else 0.,
             },
             "request_level": {
                 "unique_requests": self.unique_requests,
@@ -286,6 +306,7 @@ class CacheTelemetry:
                 "hits": self.total_hits_ts,
                 "misses": self.total_misses_ts,
                 "evictions": self.total_evictions_ts,
+                "host_hits": self.host_hits_ts,
             },
             "request_level_ts": {
                 "unique_requests": self.unique_requests_ts,
@@ -293,6 +314,7 @@ class CacheTelemetry:
                 "misses": self.requests_with_misses_ts,
                 "evictions": self.requests_with_evictions_ts,
             },
+            "write_back_time": self.time_in_write_back,
             "cache_type": self.cache_type,
             "page_size": self.page_size,
             "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
