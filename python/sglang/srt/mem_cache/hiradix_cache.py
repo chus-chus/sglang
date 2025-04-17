@@ -204,7 +204,7 @@ class HiRadixCache(RadixCache):
                 time.sleep(0.1)
             if self.enable_cache_telemetry:
                 block_end_time = time.time()
-                self.cache_controller.increment_write_back_time(block_end_time - block_start_time)
+                self.cache_telemetry.increment_write_back_time(block_end_time - block_start_time)
 
     def _evict_write_through(self, node: TreeNode):
         # evict a node already written to host

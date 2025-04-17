@@ -154,9 +154,12 @@ class CacheTelemetry:
     """
 
     _file_lock = threading.Lock()
+    _instance_count = 0  # Track number of instances created
 
     def __init__(self, page_size: int, cache_type: str, output_dir: str, reset_cache_telemetry_on_new_file: bool = False):
-        print("[DEBUG] CacheTelemetry: Initializing telemetry tracking")
+        logger.info("[DEBUG] CacheTelemetry: Initializing telemetry tracking")
+        CacheTelemetry._instance_count += 1  # Increment the instance counter
+        logger.info(f"[DEBUG] CacheTelemetry: Total instances created: {CacheTelemetry._instance_count}")
         self.page_size = page_size
         self.cache_type = cache_type
         self.output_dir = output_dir
@@ -167,6 +170,9 @@ class CacheTelemetry:
 
     def reset(self):
         print("[DEBUG] CacheTelemetry: Resetting all telemetry counters")
+
+        # before reset, dump all data, with timestamps included
+        self.record_all_stats()
         
         # block
         self.total_blocks = 0
@@ -213,6 +219,8 @@ class CacheTelemetry:
                 self.requests_with_hits.add(request_id)
                 self.requests_with_hits_ts.append((time.time() - self.init_time, 1))
                 num_blocks -= 1
+
+                logger.info(f"[DEBUG] CacheTelemetry: New request {request_id} logged new blocks (+{num_blocks})")
 
         if num_blocks > 0:
             # logger.info(f"[DEBUG] CacheTelemetry: req {request_id} logged new blocks (+{num_blocks})")
@@ -299,6 +307,27 @@ class CacheTelemetry:
                 "hit_rate": len(self.requests_with_hits) / self.unique_requests if self.unique_requests > 0 else 0.,
                 "miss_rate": len(self.requests_with_misses) / self.unique_requests if self.unique_requests > 0 else 0.,
             },
+            "write_back_time": self.time_in_write_back,
+            "cache_type": self.cache_type,
+            "page_size": self.page_size,
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    def get_all_stats(self) -> Dict:
+
+        return {
+            "block_level": {
+                "total_blocks": self.total_blocks if self.total_blocks > 0 else 0,
+                "hits": self.total_hits if self.total_hits > 0 else 0,
+                "misses": self.total_misses,
+                "evictions": self.total_evictions,
+                "host_hits": self.host_hits,
+                "device_hits": self.total_hits - self.host_hits,
+                "hit_rate": self.total_hits / self.total_blocks if self.total_blocks > 0 else 0.,
+                "miss_rate": self.total_misses / self.total_blocks if self.total_blocks > 0 else 0.,
+                "host_hit_rate": self.host_hits / self.total_hits if self.total_hits > 0 else 0.,
+                "device_hit_rate": (self.total_hits - self.host_hits) / self.total_hits if self.total_hits > 0 else 0.,
+            },
             "block_level_ts": {
                 "total_blocks": self.total_blocks_ts,
                 "hits": self.total_hits_ts,
@@ -311,6 +340,14 @@ class CacheTelemetry:
                 "hits": self.requests_with_hits_ts,
                 "misses": self.requests_with_misses_ts,
                 "evictions": self.requests_with_evictions_ts,
+            },
+            "request_level": {
+                "unique_requests": self.unique_requests,
+                "hits": len(self.requests_with_hits),
+                "misses": len(self.requests_with_misses),
+                "evictions": len(self.requests_with_evictions),
+                "hit_rate": len(self.requests_with_hits) / self.unique_requests if self.unique_requests > 0 else 0.,
+                "miss_rate": len(self.requests_with_misses) / self.unique_requests if self.unique_requests > 0 else 0.,
             },
             "write_back_time": self.time_in_write_back,
             "cache_type": self.cache_type,
@@ -331,6 +368,21 @@ class CacheTelemetry:
                 if not os.path.exists(filepath) and self.reset_cache_telemetry_on_new_file:
                     self.reset()
                     
+                with open(filepath, "w") as f:
+                    json.dump(stats, f, indent=4)
+                    
+            except (IOError, OSError) as e:
+                logging.warning(f"Failed to write cache telemetry stats: {e}")
+
+    def record_all_stats(self):
+        # write to disk with safety measures
+        stats = self.get_all_stats()
+        
+        with CacheTelemetry._file_lock:
+            try:
+                os.makedirs(self.output_dir, exist_ok=True)
+                
+                filepath = os.path.join(self.output_dir, "cache_telemetry.json")
                 with open(filepath, "w") as f:
                     json.dump(stats, f, indent=4)
                     

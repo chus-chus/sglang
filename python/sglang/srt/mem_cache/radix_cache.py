@@ -194,11 +194,11 @@ class RadixCache(BasePrefixCache):
 
         if value:
             value = torch.cat(value)
-            logger.info(f"RadixCache: should log telemetry {should_log_telemetry}, enable cache tel: {self.enable_cache_telemetry}")
+            # logger.info(f"RadixCache: should log telemetry {should_log_telemetry}, enable cache tel: {self.enable_cache_telemetry}")
             if should_log_telemetry and self.enable_cache_telemetry:
                 # cache hit
                 num_blocks_hit = len(value) / self.page_size
-                logger.info(f"[DEBUG] RadixCache: Cache hit: {len(value)} for request {rid}. Blocks {num_blocks_hit}")
+                # logger.info(f"[DEBUG] RadixCache: Cache hit: {len(value)} for request {rid}. Blocks {num_blocks_hit}")
                 self.cache_telemetry.record_hit(num_blocks_hit, rid)
         else:
             value = torch.empty((0,), dtype=torch.int64, device=self.device)
