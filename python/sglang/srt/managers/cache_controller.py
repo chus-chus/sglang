@@ -164,22 +164,16 @@ class CacheTelemetry:
         self.cache_type = cache_type
         self.output_dir = output_dir
         self.reset_cache_telemetry_on_new_file = reset_cache_telemetry_on_new_file # this is a hacky way to reset the counters when the output file is rotated
+    
+        self.init_fields()
         self.init_time = time.time()
-        self.time_in_write_back = 0
-        self.reset()
-
-    def reset(self):
-        print("[DEBUG] CacheTelemetry: Resetting all telemetry counters")
-
-        # before reset, dump all data, with timestamps included
-        self.record_all_stats()
         
+    def init_fields(self):
         # block
         self.total_blocks = 0
         self.total_hits = 0
         self.total_misses = 0
         self.total_evictions = 0
-        self.first_block = True
         self.host_hits = 0
         self.written_blocks_host = 0
 
@@ -196,7 +190,6 @@ class CacheTelemetry:
         self.requests_with_hits = set()
         self.requests_with_misses = set()
         self.requests_with_evictions = set()
-        
         self.tracked_requests = set() # keep track of unique request IDs
 
         # requests (time series)
@@ -205,6 +198,15 @@ class CacheTelemetry:
         self.requests_with_misses_ts = [] # (timestamp, num_misses)
         self.requests_with_evictions_ts = [] # (timestamp, num_evictions)
 
+        self.time_in_write_back = 0
+
+    def reset(self):
+        print("[DEBUG] CacheTelemetry: Resetting all telemetry counters")
+
+        # before reset, dump all data, with timestamps included
+        if self.total_blocks > 0:
+            self.record_stats_ts()
+        self.init_fields()
         self.init_time = time.time()
 
     def record_hit(self, num_blocks: int = 0, request_id=None):
@@ -313,7 +315,7 @@ class CacheTelemetry:
             "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-    def get_all_stats(self) -> Dict:
+    def get_all_stats_ts(self) -> Dict:
 
         return {
             "block_level": {
@@ -374,21 +376,20 @@ class CacheTelemetry:
             except (IOError, OSError) as e:
                 logging.warning(f"Failed to write cache telemetry stats: {e}")
 
-    def record_all_stats(self):
-        # write to disk with safety measures
-        stats = self.get_all_stats()
-        
-        with CacheTelemetry._file_lock:
-            try:
-                os.makedirs(self.output_dir, exist_ok=True)
+    def record_stats_ts(self):
+        stats = self.get_all_stats_ts()
+        try:
+            os.makedirs(self.output_dir, exist_ok=True)
+            filepath = os.path.join(self.output_dir, "cache_telemetry_ts.json")
+            with open(filepath, "w", buffering=1024*1024) as f:
+                encoder = json.JSONEncoder(indent=4)
+                # file can be large, so write in chunks
+                for chunk in encoder.iterencode(stats):
+                    f.write(chunk)
+                    f.flush()         
+        except (IOError, OSError) as e:
+            logging.warning(f"[CacheTelemetry] Failed to write cache telemetry stats: {e}")
                 
-                filepath = os.path.join(self.output_dir, "cache_telemetry.json")
-                with open(filepath, "w") as f:
-                    json.dump(stats, f, indent=4)
-                    
-            except (IOError, OSError) as e:
-                logging.warning(f"Failed to write cache telemetry stats: {e}")
-
 
 class HiCacheController:
 
