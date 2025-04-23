@@ -28,19 +28,20 @@ class HiRadixCache(RadixCache):
         tp_cache_group: torch.distributed.ProcessGroup,
         page_size: int,
         hicache_ratio: float,
+        hicache_size: int,
+        hicache_write_policy: str,
         enable_cache_telemetry: bool = False,
         cache_telemetry_output_dir: Optional[str] = None,
         reset_cache_telemetry_on_new_file: bool = False,
-        write_policy: str = "write_through_selective",
     ):
         self.kv_cache = token_to_kv_pool_allocator.get_kvcache()
         if isinstance(self.kv_cache, MHATokenToKVPool):
             self.token_to_kv_pool_host = MHATokenToKVPoolHost(
-                self.kv_cache, hicache_ratio, page_size
+                self.kv_cache, hicache_ratio, hicache_size, page_size
             )
         elif isinstance(self.kv_cache, MLATokenToKVPool):
             self.token_to_kv_pool_host = MLATokenToKVPoolHost(
-                self.kv_cache, hicache_ratio, page_size
+                self.kv_cache, hicache_ratio, hicache_size, page_size
             )
         else:
             raise ValueError(f"HiRadixCache only supports MHA and MLA yet")
@@ -56,7 +57,7 @@ class HiRadixCache(RadixCache):
             self.token_to_kv_pool_host,
             page_size,
             load_cache_event=self.load_cache_event,
-            write_policy=write_policy,
+            write_policy=hicache_write_policy,
         )
         
         # record the nodes with ongoing write through
@@ -64,7 +65,9 @@ class HiRadixCache(RadixCache):
         # record the node segments with ongoing load back
         self.ongoing_load_back = {}
         # todo: dynamically adjust the threshold
-        self.write_through_threshold = 1
+        self.write_through_threshold = (
+            1 if hicache_write_policy == "write_through" else 3
+        )
         self.load_back_threshold = 10
         super().__init__(
             req_to_token_pool, token_to_kv_pool_allocator, page_size, disable=False, enable_cache_telemetry=self.enable_cache_telemetry,
@@ -89,7 +92,7 @@ class HiRadixCache(RadixCache):
             height += 1
         return height
 
-    def write_backup(self, node: TreeNode):
+    def write_backup(self, node: TreeNode, write_back=False):
         host_indices = self.cache_controller.write(
             device_indices=node.value,
             node_id=node.id,
@@ -103,9 +106,11 @@ class HiRadixCache(RadixCache):
         if host_indices is not None:
             node.host_value = host_indices
             self.ongoing_write_through[node.id] = node
-            self.inc_lock_ref(node)
+            if not write_back:
+                # no need to lock nodes if write back
+                self.inc_lock_ref(node)
         else:
-            return None
+            return 0
 
         if self.enable_cache_telemetry:
             # cache write to host
@@ -113,14 +118,20 @@ class HiRadixCache(RadixCache):
         return len(host_indices)
 
     def inc_hit_count(self, node: TreeNode):
-        if self.cache_controller.write_policy != "write_through_selective":
+        if node.backuped or self.cache_controller.write_policy == "write_back":
             return
         node.hit_count += 1
-        if node.host_value is None and node.hit_count > self.write_through_threshold:
+        if node.hit_count >= self.write_through_threshold:
             self.write_backup(node)
             node.hit_count = 0
 
-    def writing_check(self):
+    def writing_check(self, write_back=False):
+        if write_back:
+            # blocking till all write back complete
+            while len(self.ongoing_write_through) > 0:
+                ack_id = self.cache_controller.ack_write_queue.get()
+                del self.ongoing_write_through[ack_id]
+            return
         queue_size = torch.tensor(
             self.cache_controller.ack_write_queue.qsize(), dtype=torch.int
         )
@@ -159,35 +170,31 @@ class HiRadixCache(RadixCache):
         heapq.heapify(leaves)
 
         num_evicted = 0
-        pending_nodes = []
+        write_back_nodes = []
         while num_evicted < num_tokens and len(leaves):
             x = heapq.heappop(leaves)
 
             if x.lock_ref > 0:
                 continue
 
-            if x.host_value is None:
+            if not x.backuped:
                 if self.cache_controller.write_policy == "write_back":
-                    to_evict = self.write_backup(x)
-                elif self.cache_controller.write_policy == "write_through_selective":
-                    to_evict = self._evict_write_through_selective(x)
+                    # write to host if the node is not backuped
+                    num_evicted += self.write_backup(x, write_back=True)
+                    write_back_nodes.append(x)
                 else:
-                    assert (
-                        self.cache_controller.write_policy != "write_through"
-                    ), "write_through should be inclusive"
-                    raise NotImplementedError
+                    num_evicted += self._evict_regular(x)
             else:
-                to_evict = self._evict_write_through(x)
-
-            num_evicted += to_evict
+                num_evicted += self._evict_backuped(x)
 
             if self.enable_cache_telemetry:
                 # cache eviction
-                num_blocks_evicted = to_evict / self.page_size
-                self.cache_telemetry.record_eviction(num_blocks_evicted)
+                pass
+                #num_blocks_evicted = to_evict / self.page_size
+                #self.cache_telemetry.record_eviction(num_blocks_evicted)
 
             for child in x.parent.children.values():
-                if child in pending_nodes:
+                if child in write_back_nodes:
                     continue
                 if not child.evicted:
                     break
@@ -196,17 +203,17 @@ class HiRadixCache(RadixCache):
                 heapq.heappush(leaves, x.parent)
 
         if self.cache_controller.write_policy == "write_back":
-            # blocking till all write back complete
             if self.enable_cache_telemetry:
                 block_start_time = time.time()
-            while len(self.ongoing_write_through) > 0:
-                self.writing_check()
-                time.sleep(0.1)
+            self.writing_check(write_back=True)
+            for node in write_back_nodes:
+                assert node.backuped
+                self._evict_backuped(node)
             if self.enable_cache_telemetry:
                 block_end_time = time.time()
                 self.cache_telemetry.increment_write_back_time(block_end_time - block_start_time)
 
-    def _evict_write_through(self, node: TreeNode):
+    def _evict_backuped(self, node: TreeNode):
         # evict a node already written to host
         num_evicted = self.cache_controller.evict_device(node.value, node.host_value)
         assert num_evicted > 0
@@ -214,7 +221,7 @@ class HiRadixCache(RadixCache):
         node.value = None
         return num_evicted
 
-    def _evict_write_through_selective(self, node: TreeNode):
+    def _evict_regular(self, node: TreeNode):
         # evict a node not initiated write to host
         self.cache_controller.mem_pool_device_allocator.free(node.value)
         num_evicted = len(node.value)
@@ -384,6 +391,7 @@ class HiRadixCache(RadixCache):
             prefix_len = self.key_match_fn(child.key, key)
             if prefix_len < len(child.key):
                 new_node = self._split_node(child.key, child, prefix_len)
+                self.inc_hit_count(new_node)
                 if not new_node.evicted:
                     value.append(new_node.value)
                     # device_hits += len(new_node.value)
@@ -394,6 +402,7 @@ class HiRadixCache(RadixCache):
                 node = new_node
                 break
             else:
+                self.inc_hit_count(child)
                 if not child.evicted:
                     value.append(child.value)
                     # device_hits += len(child.value)
@@ -424,7 +433,7 @@ class HiRadixCache(RadixCache):
         else:
             new_node.value = child.value[:split_len]
             child.value = child.value[split_len:]
-        if child.host_value is not None:
+        if child.backuped:
             new_node.host_value = child.host_value[:split_len]
             child.host_value = child.host_value[split_len:]
         child.parent = new_node
@@ -481,8 +490,8 @@ class HiRadixCache(RadixCache):
             node.children[child_key] = new_node
             self.evictable_size_ += len(value)
 
-            if self.cache_controller.write_policy == "write_through":
-                self.write_backup(new_node)
+            if self.cache_controller.write_policy != "write_back":
+                self.inc_hit_count(new_node)
         return total_prefix_length
 
     def _collect_leaves_device(self):
