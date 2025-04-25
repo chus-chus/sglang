@@ -381,15 +381,29 @@ class CacheTelemetry:
         try:
             os.makedirs(self.output_dir, exist_ok=True)
             filepath = os.path.join(self.output_dir, "cache_telemetry_ts.json")
-            with open(filepath, "w", buffering=1024*1024) as f:
-                encoder = json.JSONEncoder(indent=4)
-                # file can be large, so write in chunks
-                for chunk in encoder.iterencode(stats):
-                    f.write(chunk)
-                    f.flush()         
+            
+            # Try to use faster JSON libraries if available, because file is large
+            try:
+                import orjson
+                # orjson is much faster but returns bytes
+                with open(filepath, "wb", buffering=8*1024*1024) as f:
+                    f.write(orjson.dumps(stats))
+            except ImportError:
+                try:
+                    import ujson
+                    with open(filepath, "w", buffering=8*1024*1024) as f:
+                        ujson.dump(stats, f)
+                except ImportError:
+                    # Fall back to standard json with optimized settings
+                    with open(filepath, "w", buffering=8*1024*1024) as f:
+                        # Remove indent for better performance with large files
+                        encoder = json.JSONEncoder(separators=(',', ':'))
+                        # Write in larger chunks for better I/O performance
+                        for chunk in encoder.iterencode(stats):
+                            f.write(chunk)
         except (IOError, OSError) as e:
             logging.warning(f"[CacheTelemetry] Failed to write cache telemetry stats: {e}")
-                
+
 
 class HiCacheController:
 

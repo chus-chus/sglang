@@ -180,10 +180,9 @@ class ServerArgs:
     enable_custom_logit_processor: bool = False
     tool_call_parser: Optional[str] = None
     enable_hierarchical_cache: bool = False
-    hiradix_write_policy: str = "write_through_selective"
+    hicache_write_policy: str = "write_through_selective"
     hicache_ratio: float = 2.0
     hicache_size: int = 0
-    hicache_write_policy: str = "write_through_selective"
     flashinfer_mla_disable_ragged: bool = False
     warmups: Optional[str] = None
     moe_dense_tp_size: Optional[int] = None
@@ -563,9 +562,9 @@ class ServerArgs:
             help="Whether to use a CausalLM as an embedding model.",
         )
         parser.add_argument(
-            "--hiradix-write-policy",
+            "--hicache-write-policy",
             type=str,
-            default=ServerArgs.hiradix_write_policy,
+            default=ServerArgs.hicache_write_policy,
             help="The write policy for HiRadixCache.",
         )
         parser.add_argument(
@@ -1142,13 +1141,6 @@ class ServerArgs:
             type=int,
             default=ServerArgs.hicache_size,
             help="The size of host KV cache memory pool in gigabytes, which will override the hicache_ratio if set.",
-        )
-        parser.add_argument(
-            "--hicache-write-policy",
-            type=str,
-            choices=["write_back", "write_through", "write_through_selective"],
-            default=ServerArgs.hicache_write_policy,
-            help="The write policy of hierarchical cache.",
         )
         parser.add_argument(
             "--enable-deepep-moe",

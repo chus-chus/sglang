@@ -180,18 +180,19 @@ class HiRadixCache(RadixCache):
             if not x.backuped:
                 if self.cache_controller.write_policy == "write_back":
                     # write to host if the node is not backuped
-                    num_evicted += self.write_backup(x, write_back=True)
+                    to_evict = self.write_backup(x, write_back=True)
                     write_back_nodes.append(x)
                 else:
-                    num_evicted += self._evict_regular(x)
+                    to_evict = self._evict_regular(x)
             else:
-                num_evicted += self._evict_backuped(x)
+                to_evict = self._evict_backuped(x)
+
+            num_evicted += to_evict
 
             if self.enable_cache_telemetry:
                 # cache eviction
-                pass
-                #num_blocks_evicted = to_evict / self.page_size
-                #self.cache_telemetry.record_eviction(num_blocks_evicted)
+                num_blocks_evicted = to_evict / self.page_size
+                self.cache_telemetry.record_eviction(num_blocks_evicted)
 
             for child in x.parent.children.values():
                 if child in write_back_nodes:
