@@ -285,6 +285,7 @@ class MultimodalInputs:
     num_image_tokens: Optional[int] = None
 
     # QWen2-VL related
+    mrope_positions: Optional[torch.Tensor] = None
     mrope_position_delta: Optional[torch.Tensor] = None
 
     # image
@@ -310,16 +311,12 @@ class MultimodalInputs:
         assert isinstance(ret.mm_items, list)
         ret.mm_items = [item for item in ret.mm_items if item.is_valid()]
 
-        assert len(ret.mm_items) != 0
-
-        # Use image hash as fake token_ids. We use this as the key for prefix matching in the radix cache.
-        # Please note that if the `input_ids` is later used in the model forward,
-        # you also need to clamp the values within the range of [0, vocab_size) to avoid out-of-bound
-        # errors in cuda kernels. See also llava.py for example.
         for item in ret.mm_items:
             item.set_pad_value()
 
         optional_args = [
+            "mrope_positions",
+            "mrope_position_delta",
             "im_token_id",
             "im_start_id",
             "im_end_id",
@@ -350,20 +347,26 @@ class MultimodalInputs:
         merge image inputs when requests are being merged
         """
 
-        # Use image hash as fake token_ids. We use this as the key for prefix matching in the radix cache.
-        # Please note that if the `input_ids` is later used in the model forward,
-        # you also need to clamp the values within the range of [0, vocab_size) to avoid out-of-bound
-        # errors in cuda kernels. See also llava.py for example.
-
         # args needed to be merged
         optional_args = [
             "mm_items",
             "image_pad_len",
+            "mrope_position_delta",
         ]
         for arg in optional_args:
             self_arg = getattr(self, arg, None)
             if self_arg is not None:
                 setattr(self, arg, self_arg + getattr(other, arg))
+
+        mrope_positions = self.mrope_positions
+        if mrope_positions is not None:
+            if other.mrope_positions is None:
+                self.mrope_positions = mrope_positions
+            else:
+                self.mrope_positions = torch.cat(
+                    [self.mrope_positions, other.mrope_positions], dim=1
+                )
+
         # other args would be kept intact
 
 
@@ -388,6 +391,7 @@ class Req:
         return_hidden_states: bool = False,
         eos_token_ids: Optional[Set[int]] = None,
         bootstrap_host: Optional[str] = None,
+        bootstrap_port: Optional[int] = None,
         bootstrap_room: Optional[int] = None,
     ):
         # Input and output info
@@ -523,6 +527,7 @@ class Req:
 
         # For disaggregation
         self.bootstrap_host: str = bootstrap_host
+        self.bootstrap_port: Optional[int] = bootstrap_port
         self.bootstrap_room: Optional[int] = bootstrap_room
         self.disagg_kv_sender: Optional[BaseKVSender] = None
 
