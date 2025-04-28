@@ -473,6 +473,7 @@ class PrefillAdder:
                 and req.last_node_global is not None
                 and req.last_node_global.evicted
             ):
+                print(f"[DEBUG] HiRadixCache: init load back")
                 req.last_node, req.prefix_indices = self.tree_cache.init_load_back(
                     req.last_node_global, req.prefix_indices
                 )

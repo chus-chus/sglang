@@ -6,7 +6,7 @@ from typing import List, Optional
 
 import torch
 
-from sglang.srt.managers.cache_controller import HiCacheController
+from sglang.srt.managers.cache_controller import HiCacheController, CacheTelemetry
 from sglang.srt.mem_cache.memory_pool import (
     MHATokenToKVPool,
     MHATokenToKVPoolHost,
@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 
 class HiRadixCache(RadixCache):
-
     def __init__(
         self,
         req_to_token_pool: ReqToTokenPool,
@@ -29,6 +28,10 @@ class HiRadixCache(RadixCache):
         tp_cache_group: torch.distributed.ProcessGroup,
         page_size: int,
         hicache_ratio: float,
+        enable_cache_telemetry: bool = False,
+        cache_telemetry_output_dir: Optional[str] = None,
+        reset_cache_telemetry_on_new_file: bool = False,
+        write_policy: str = "write_through_selective",
     ):
         self.kv_cache = token_to_kv_pool_allocator.get_kvcache()
         if isinstance(self.kv_cache, MHATokenToKVPool):
@@ -44,14 +47,18 @@ class HiRadixCache(RadixCache):
 
         self.tp_group = tp_cache_group
 
+        self.enable_cache_telemetry = enable_cache_telemetry
+        self.cache_telemetry_output_dir = cache_telemetry_output_dir
+        self.reset_cache_telemetry_on_new_file = reset_cache_telemetry_on_new_file
         self.load_cache_event = threading.Event()
         self.cache_controller = HiCacheController(
             token_to_kv_pool_allocator,
             self.token_to_kv_pool_host,
             page_size,
             load_cache_event=self.load_cache_event,
+            write_policy=write_policy,
         )
-
+        
         # record the nodes with ongoing write through
         self.ongoing_write_through = {}
         # record the node segments with ongoing load back
@@ -60,10 +67,16 @@ class HiRadixCache(RadixCache):
         self.write_through_threshold = 1
         self.load_back_threshold = 10
         super().__init__(
-            req_to_token_pool, token_to_kv_pool_allocator, page_size, disable=False
+            req_to_token_pool, token_to_kv_pool_allocator, page_size, disable=False, enable_cache_telemetry=self.enable_cache_telemetry,
         )
+        if self.enable_cache_telemetry:
+            self.cache_telemetry = CacheTelemetry(page_size, "hiradix", cache_telemetry_output_dir, reset_cache_telemetry_on_new_file)
 
     def reset(self):
+        # reset telemetry counters
+        if self.enable_cache_telemetry and hasattr(self, 'cache_telemetry'):
+            self.cache_telemetry.reset()
+
         TreeNode.counter = 0
         self.cache_controller.reset()
         self.token_to_kv_pool_host.clear()
@@ -94,6 +107,9 @@ class HiRadixCache(RadixCache):
         else:
             return None
 
+        if self.enable_cache_telemetry:
+            # cache write to host
+            self.cache_telemetry.record_host_write(len(host_indices) / self.page_size)
         return len(host_indices)
 
     def inc_hit_count(self, node: TreeNode):
@@ -152,16 +168,23 @@ class HiRadixCache(RadixCache):
 
             if x.host_value is None:
                 if self.cache_controller.write_policy == "write_back":
-                    num_evicted += self.write_backup(x)
+                    to_evict = self.write_backup(x)
                 elif self.cache_controller.write_policy == "write_through_selective":
-                    num_evicted += self._evict_write_through_selective(x)
+                    to_evict = self._evict_write_through_selective(x)
                 else:
                     assert (
                         self.cache_controller.write_policy != "write_through"
                     ), "write_through should be inclusive"
                     raise NotImplementedError
             else:
-                num_evicted += self._evict_write_through(x)
+                to_evict = self._evict_write_through(x)
+
+            num_evicted += to_evict
+
+            if self.enable_cache_telemetry:
+                # cache eviction
+                num_blocks_evicted = to_evict / self.page_size
+                self.cache_telemetry.record_eviction(num_blocks_evicted)
 
             for child in x.parent.children.values():
                 if child in pending_nodes:
@@ -174,9 +197,14 @@ class HiRadixCache(RadixCache):
 
         if self.cache_controller.write_policy == "write_back":
             # blocking till all write back complete
+            if self.enable_cache_telemetry:
+                block_start_time = time.time()
             while len(self.ongoing_write_through) > 0:
                 self.writing_check()
                 time.sleep(0.1)
+            if self.enable_cache_telemetry:
+                block_end_time = time.time()
+                self.cache_telemetry.increment_write_back_time(block_end_time - block_start_time)
 
     def _evict_write_through(self, node: TreeNode):
         # evict a node already written to host
@@ -266,6 +294,13 @@ class HiRadixCache(RadixCache):
         self.evictable_size_ += len(device_indices)
         self.inc_lock_ref(last_hit_node)
 
+        print(f"[DEBUG] HiRadixCache: load back {len(device_indices) / self.page_size} blocks")
+
+        if self.enable_cache_telemetry:
+            # cache hit (on host)
+            print(f"[DEBUG] HiRadixCache: record hit {len(device_indices) / self.page_size}")
+            self.cache_telemetry.record_host_hit(len(device_indices) / self.page_size)
+
         return device_indices
 
     def init_load_back(
@@ -274,6 +309,7 @@ class HiRadixCache(RadixCache):
         prefix_indices: torch.Tensor,
         mem_quota: Optional[int] = None,
     ):
+        print(f"[DEBUG] HiRadixCache: init load back {len(prefix_indices) / self.page_size} blocks")
         assert (
             len(prefix_indices) == 0 or prefix_indices.is_cuda
         ), "indices of device kV caches should be on GPU"
@@ -297,7 +333,10 @@ class HiRadixCache(RadixCache):
     def ready_to_load_cache(self):
         self.load_cache_event.set()
 
-    def match_prefix(self, key: List[int], include_evicted=False, **kwargs):
+    def match_prefix(self, key: List[int], rid: Optional[str] = None, include_evicted=False, **kwargs):
+        import inspect
+        should_log_telemetry = inspect.currentframe().f_back.f_code.co_name == "init_next_round_input"
+
         empty_value = torch.empty((0,), dtype=torch.int64, device=self.device)
         if self.disable or len(key) == 0:
             if include_evicted:
@@ -310,10 +349,20 @@ class HiRadixCache(RadixCache):
             key = key[:page_aligned_len]
 
         value, last_node = self._match_prefix_helper(self.root_node, key)
+
         if value:
             value = torch.cat(value)
+            if should_log_telemetry and self.enable_cache_telemetry:
+                # cache hit
+                num_blocks_hit = len(value) / self.page_size
+                self.cache_telemetry.record_hit(num_blocks_hit, rid)
         else:
             value = empty_value
+
+        if should_log_telemetry and self.enable_cache_telemetry and len(key) - len(value) > 0:
+            # cache miss
+            num_blocks_missed = (len(key) - len(value)) / self.page_size
+            self.cache_telemetry.record_miss(num_blocks_missed, rid)
 
         last_node_global = last_node
         while last_node.evicted:
@@ -337,11 +386,21 @@ class HiRadixCache(RadixCache):
                 new_node = self._split_node(child.key, child, prefix_len)
                 if not new_node.evicted:
                     value.append(new_node.value)
+                    # device_hits += len(new_node.value)
+                    # print(f"[DEBUG] new_node.value: {new_node.value}")
+                    # print(f"[DEBUG] new_node.host_value: {new_node.host_value}")
+                    # if new_node.host_value is not None:
+                    #     host_hits += torch.isin(new_node.value, new_node.host_value).sum().item()
                 node = new_node
                 break
             else:
                 if not child.evicted:
                     value.append(child.value)
+                    # device_hits += len(child.value)
+                    # print(f"[DEBUG] child.value: {child.value}")
+                    # print(f"[DEBUG] child.host_value: {child.host_value}")
+                    # if child.host_value is not None:
+                    #     host_hits += torch.isin(child.value.cpu(), child.host_value).sum().item()
                 node = child
                 key = key[prefix_len:]
 
@@ -372,8 +431,8 @@ class HiRadixCache(RadixCache):
         child.key = child.key[split_len:]
         new_node.parent.children[self.get_child_key_fn(key)] = new_node
         return new_node
-
-    def _insert_helper(self, node: TreeNode, key: List, value):
+        
+    def _insert_helper(self, node: TreeNode, key: List, value, rid: str = None):
         node.last_access_time = time.time()
         if len(key) == 0:
             return 0
@@ -385,7 +444,7 @@ class HiRadixCache(RadixCache):
             node = node.children[child_key]
             node.last_access_time = time.time()
             prefix_len = self.key_match_fn(node.key, key)
-
+        
             if prefix_len == len(node.key):
                 if node.evicted:
                     # change the reference if the node is evicted

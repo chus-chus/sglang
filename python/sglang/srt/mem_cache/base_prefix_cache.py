@@ -14,7 +14,7 @@ class BasePrefixCache(ABC):
         pass
 
     @abstractmethod
-    def insert(self, **kwargs):
+    def insert(self, rid: str = None, **kwargs):
         pass
 
     @abstractmethod
@@ -26,7 +26,7 @@ class BasePrefixCache(ABC):
         pass
 
     @abstractmethod
-    def evict(self, num_tokens: int):
+    def evict(self, num_tokens: int, rid: str = None):
         pass
 
     @abstractmethod

@@ -484,6 +484,10 @@ class Scheduler(
                     tp_cache_group=self.tp_worker.get_tp_cpu_group(),
                     page_size=self.page_size,
                     hicache_ratio=server_args.hicache_ratio,
+                    enable_cache_telemetry=server_args.enable_cache_telemetry,
+                    cache_telemetry_output_dir=server_args.cache_telemetry_output_dir,
+                    reset_cache_telemetry_on_new_file=server_args.reset_cache_telemetry_on_new_file,
+                    write_policy=server_args.hiradix_write_policy,
                 )
             else:
                 self.tree_cache = RadixCache(
@@ -491,6 +495,9 @@ class Scheduler(
                     token_to_kv_pool_allocator=self.token_to_kv_pool_allocator,
                     page_size=self.page_size,
                     disable=server_args.disable_radix_cache,
+                    enable_cache_telemetry=server_args.enable_cache_telemetry,
+                    cache_telemetry_output_dir=server_args.cache_telemetry_output_dir,
+                    reset_cache_telemetry_on_new_file=server_args.reset_cache_telemetry_on_new_file,
                 )
 
         self.decode_mem_cache_buf_multiplier = (

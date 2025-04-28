@@ -103,6 +103,9 @@ class ServerArgs:
     api_key: Optional[str] = None
     file_storage_path: str = "sglang_storage"
     enable_cache_report: bool = False
+    enable_cache_telemetry: bool = False
+    cache_telemetry_output_dir: str = "."
+    reset_cache_telemetry_on_new_file: bool = False
     reasoning_parser: Optional[str] = None
 
     # Data parallelism
@@ -178,6 +181,7 @@ class ServerArgs:
     enable_custom_logit_processor: bool = False
     tool_call_parser: Optional[str] = None
     enable_hierarchical_cache: bool = False
+    hiradix_write_policy: str = "write_through_selective"
     hicache_ratio: float = 2.0
     enable_flashinfer_mla: bool = False  # TODO: remove this argument
     enable_flashmla: bool = False
@@ -546,6 +550,12 @@ class ServerArgs:
             help="Whether to use a CausalLM as an embedding model.",
         )
         parser.add_argument(
+            "--hiradix-write-policy",
+            type=str,
+            default=ServerArgs.hiradix_write_policy,
+            help="The write policy for HiRadixCache.",
+        )
+        parser.add_argument(
             "--revision",
             type=str,
             default=None,
@@ -732,6 +742,23 @@ class ServerArgs:
             "--enable-cache-report",
             action="store_true",
             help="Return number of cached tokens in usage.prompt_tokens_details for each openai request.",
+        )
+        parser.add_argument(
+            "--enable-cache-telemetry",
+            action="store_true",
+            default=ServerArgs.enable_cache_telemetry,
+            help="Enable cache telemetry.",
+        )
+        parser.add_argument(
+            "--cache-telemetry-output-dir",
+            type=str,
+            default=ServerArgs.cache_telemetry_output_dir,
+            help="The output directory for cache telemetry.",
+        )
+        parser.add_argument(
+            "--reset-cache-telemetry-on-new-file",
+            action="store_true",
+            help="Reset cache telemetry counters when the output file is rotated.",
         )
         parser.add_argument(
             "--reasoning-parser",
