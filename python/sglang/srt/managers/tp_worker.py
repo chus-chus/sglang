@@ -126,6 +126,13 @@ class TpModelWorker:
             self.max_req_len > 0 and self.max_req_input_len > 0
         ), "Memory pool size is too small"
 
+        # log capacity of server
+        logging.info(f"[DEBUG] Server capacity: max total tokens {self.max_total_num_tokens}")
+        logging.info(f"[DEBUG] Server capacity: max running requests {self.max_running_requests}")
+        logging.info(f"[DEBUG] Server capacity: max input tokens {self.max_req_input_len}")
+        logging.info(f"[DEBUG] Server capacity: max total tokens {self.max_req_len}")
+        logging.info(f"[DEBUG] Server capacity: max prefill tokens {self.max_prefill_tokens}")
+
         # Sync random seed across TP workers
         self.random_seed = broadcast_pyobj(
             [server_args.random_seed],

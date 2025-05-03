@@ -1424,6 +1424,9 @@ async def v1_chat_completions(
     created = int(time.time())
     adapted_request, request = v1_chat_generate_request(all_requests, tokenizer_manager)
 
+    if hasattr(adapted_request, 'input_ids') and adapted_request.input_ids is not None:
+        logger.info(f"[DEBUG] Request ID: {adapted_request.rid}, Prefill tokens: {len(adapted_request.input_ids)}")
+
     if adapted_request.stream:
         parser_dict = {}
         reasoning_parser_dict = {}
